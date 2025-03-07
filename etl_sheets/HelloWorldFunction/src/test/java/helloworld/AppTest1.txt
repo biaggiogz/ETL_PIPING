@@ -1,0 +1,92 @@
+package helloworld;
+
+import com.amazonaws.services.lambda.runtime.Context;
+import com.amazonaws.services.lambda.runtime.events.APIGatewayProxyResponseEvent;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
+import static org.mockito.Mockito.*;
+
+import com.amazonaws.services.lambda.runtime.events.S3Event;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import software.amazon.awssdk.core.ResponseInputStream;
+import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.GetObjectRequest;
+import software.amazon.awssdk.services.s3.model.GetObjectResponse;
+
+import java.io.File;
+import java.io.IOException;
+
+@ExtendWith(MockitoExtension.class)
+public class AppTest {
+
+  @Mock
+  private S3Client s3Client;
+
+  @Mock
+  private Context context;
+
+  @Mock
+  private ResponseInputStream<GetObjectResponse> responseInputStream;
+
+  private App processor;
+  private ObjectMapper objectMapper;
+
+  @BeforeEach
+  void setUp() {
+    objectMapper = new ObjectMapper();
+    processor = new App() {
+      @Override
+      protected S3Client getS3Client() {
+        return s3Client;
+      }
+    };
+  }
+
+  @Test
+  public void testHandleRequest_WithValidExcelFile() throws IOException {
+    // Load test event from JSON file
+    S3Event s3Event = loadS3EventFromJson();
+
+    // Mock S3 client response
+    when(s3Client.getObject(any(GetObjectRequest.class))).thenReturn(responseInputStream);
+
+    // Execute the lambda function
+    String result = processor.handleRequest(s3Event, context);
+
+    // Verify the result
+    assertNotNull(result);
+    assertTrue(result.contains("Successfully processed file"));
+
+    // Verify S3 client was called
+    verify(s3Client).getObject(any(GetObjectRequest.class));
+  }
+
+  @Test
+  public void testHandleRequest_WithNonExcelFile() throws IOException {
+    // Load and modify test event for non-Excel file
+    S3Event s3Event = loadS3EventFromJson();
+    s3Event.getRecords().get(0).getS3().getObject();
+
+    // Execute the lambda function
+    String result = processor.handleRequest(s3Event, context);
+
+    // Verify the result
+    assertNotNull(result);
+    assertEquals("File is not an Excel file", result);
+
+    // Verify S3 client was not called
+    verify(s3Client, never()).getObject(any(GetObjectRequest.class));
+  }
+  private S3Event loadS3EventFromJson() throws IOException {
+    // Load the test event JSON file
+    ClassLoader classLoader = getClass().getClassLoader();
+    File file = new File(classLoader.getResource("event.json").getFile());
+    return objectMapper.readValue(file, S3Event.class);
+  }
+}
