@@ -8,6 +8,7 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.stream.Collectors;
+import java.util.stream.StreamSupport;
 
 import com.amazonaws.services.lambda.runtime.Context;
 import com.amazonaws.services.lambda.runtime.RequestHandler;
@@ -35,6 +36,7 @@ public class App implements RequestHandler<S3Event, String> {
     private static final String bucket_name = System.getenv("BUCKET_NAME");
     private static final String folder_source_path = System.getenv("FOLDER_SOURCE_PATH");
     private static final String destination_source_path = System.getenv("FOLDER_DESTINATION_PATH");
+    private static final int skip_row = Integer.parseInt(System.getenv("SKIP_ROW"));
     private static final String CSV_DELIMITER =",";
 
     @Override
@@ -77,11 +79,16 @@ public class App implements RequestHandler<S3Event, String> {
                      Workbook workbook = new XSSFWorkbook(fis)) {
 
                     Sheet sheet = workbook.getSheet(sheet_name);
+
                     if (sheet == null) {
                         throw new IllegalArgumentException("Sheet " + sheet_name + " not found");
                     }
 
-                    Iterator<Row> rowIterator = sheet.iterator();
+                    //Iterator<Row> rowIterator = sheet.iterator();
+                    Iterator<Row> rowIterator = StreamSupport
+                            .stream(sheet.spliterator(), false)
+                            .skip(skip_row)
+                            .iterator();
                     while (rowIterator.hasNext()) {
                         Row row = rowIterator.next();
                         StringBuilder rowContent = new StringBuilder();

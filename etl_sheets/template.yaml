@@ -23,65 +23,29 @@ Parameters:
   FolderDestinationPath:
     Type: String
     Description: Folder path to save the CSV files
+  SkipRow:
+    Type: String
+    Description: Skip row number in the Excel file
 
 Resources:
-  ProcessingBucket:
-    Type: AWS::S3::Bucket
-    Properties:
-      BucketName: !Ref BucketName
-      NotificationConfiguration:
-        EventBridgeConfiguration:
-          EventBridgeEnabled: true
 
-  EventBridgeRole:
-    Type: AWS::IAM::Role
-    DependsOn: ProcessingBucket
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: events.amazonaws.com
-            Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaRole
 
-  S3EventRule:
-    Type: AWS::Events::Rule
-    DependsOn:
-      - ProcessingBucket
-      - EventBridgeRole
-      - ExcelProcessorFunction
+  LambdaLogGroup:
+    Type: AWS::Logs::LogGroup
     Properties:
-      Description: "Rule to capture S3 events and trigger Lambda"
-      State: ENABLED
-      EventPattern:
-        source:
-          - aws.s3
-        detail-type:
-          - "Object Created"
-        detail:
-          bucket:
-            name:
-              - !Ref ProcessingBucket
-          object:
-            key:
-              - prefix: !Ref FolderSourcePath
-              -  suffix: .xlsx
-      Targets:
-        - Arn: !GetAtt ExcelProcessorFunction.Arn
-          Id: "ProcessS3Event"
-          RoleArn: !GetAtt EventBridgeRole.Arn
+      LogGroupName: !Sub /aws/lambda/${ExcelProcessorFunction}
+      RetentionInDays: 5
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+
 
   ExcelProcessorFunction:
     Type: AWS::Serverless::Function
-    DependsOn: ProcessingBucket
     Properties:
       CodeUri: ExcelProcessorFunction
       Handler: logicExcel.App::handleRequest
       Runtime: java17
-      Timeout: 30
+      Timeout: 60
       MemorySize: 1024
       AutoPublishAlias: live
       SnapStart:
@@ -91,6 +55,14 @@ Resources:
       Policies:
         - S3FullAccessPolicy:
             BucketName: !Ref BucketName
+        - Statement:
+            - Effect: Allow
+              Action:
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+                - logs:DeleteLogGroup  # Add this permission
+              Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${AWS::StackName}-*
       Environment:
         Variables:
           SHEET_NAME: !Ref SheetName
@@ -98,17 +70,17 @@ Resources:
           FOLDER_SOURCE_PATH: !Ref FolderSourcePath
           FOLDER_DESTINATION_PATH: !Ref FolderDestinationPath
           JAVA_TOOL_OPTIONS: -XX:+TieredCompilation -XX:TieredStopAtLevel=1
+          SKIP_ROW: !Ref SkipRow
 
   LambdaInvokePermission:
     Type: AWS::Lambda::Permission
     DependsOn:
       - ExcelProcessorFunction
-      - S3EventRule
     Properties:
       Action: lambda:InvokeFunction
       FunctionName: !Ref ExcelProcessorFunction
-      Principal: events.amazonaws.com
-      SourceArn: !GetAtt S3EventRule.Arn
+      Principal: s3.amazonaws.com
+      SourceArn: !Sub arn:aws:s3:::${BucketName}
 
 Outputs:
   FunctionArn:
@@ -119,7 +91,4 @@ Outputs:
     Value: !Ref ExcelProcessorFunction
   BucketName:
     Description: Name of the created S3 bucket
-    Value: !Ref ProcessingBucket
-  EventRuleArn:
-    Description: ARN of the EventBridge rule
-    Value: !GetAtt S3EventRule.Arn
+    Value: !Ref BucketName

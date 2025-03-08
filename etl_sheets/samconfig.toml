@@ -19,7 +19,7 @@ resolve_s3 = true
 stack_name = "sheetestandar"
 s3_prefix = "sheetestandar"
 region = "us-east-1"
-parameter_overrides = "BucketName=\"control-piping-2025\" SheetName=\"Estandar\" FolderSourcePath=\"support/source/\" FolderDestinationPath=\"support/destination/\""
+parameter_overrides = "BucketName=\"control-piping-2025\" SheetName=\"Estandar\" FolderSourcePath=\"support/source/\" FolderDestinationPath=\"support/destination/\" SkipRow=\"0\""
 image_repositories = []
 
 [default.package.parameters]
