@@ -1,0 +1,8 @@
+{
+  "Parameters": {
+    "SHEET_NAME": "Estandar",
+    "BUCKET_NAME": "control-piping-2025",
+    "FOLDER_SOURCE_PATH": "support/source/",
+    "FOLDER_DESTINATION_PATH": "support/destination/"
+  }
+}
