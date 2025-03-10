@@ -4,6 +4,7 @@ import com.amazonaws.services.lambda.runtime.Context;
 import com.amazonaws.services.lambda.runtime.LambdaLogger;
 import com.amazonaws.services.lambda.runtime.events.S3Event;
 import com.amazonaws.services.lambda.runtime.events.models.s3.S3EventNotification;
+import com.amazonaws.services.lambda.runtime.tests.annotations.Event;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
@@ -12,11 +13,14 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.api.extension.RegisterExtension;
+import org.junit.jupiter.params.ParameterizedTest;
 import org.mockito.Mock;
 import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.test.context.TestContext;
 import software.amazon.awssdk.core.ResponseBytes;
 import software.amazon.awssdk.core.ResponseInputStream;
 import software.amazon.awssdk.core.sync.RequestBody;
@@ -25,13 +29,13 @@ import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectResponse;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.model.PutObjectResponse;
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
+
+import java.io.*;
+
 import org.springframework.test.util.ReflectionTestUtils;
 
-import java.io.InputStream;
 import java.lang.reflect.Field;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.time.Instant;
@@ -44,7 +48,7 @@ import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 public class AppTest {
-
+    private static final Logger logger = LoggerFactory.getLogger(AppTest.class);
     @Mock
     private Context context;
 
@@ -57,12 +61,30 @@ public class AppTest {
     void setUp() {
         app = new App();
         ReflectionTestUtils.setField(app, "s3Client", s3Client);
-
         // Set up environment variables for testing
-        System.setProperty("BUCKET_NAME", "piping-control-2025");
+        System.setProperty("BUCKET_NAME", "control-piping-2025");
         System.setProperty("SHEET_NAME", "Estandar");
         System.setProperty("FOLDER_SOURCE_PATH", "support/source/");
         System.setProperty("FOLDER_DESTINATION_PATH", "support/destination/");
+    }
+
+
+
+    @ParameterizedTest
+    @Event(value = "src/test/resources/event.json", type = S3Event.class)
+    void testS3(S3Event event) {
+        logger.info("Invoke TEST - S3");
+        logger.info("Event records size: {}", event.getRecords().size());
+        if (!event.getRecords().isEmpty()) {
+            S3EventNotification.S3EventNotificationRecord record = event.getRecords().get(0);
+            logger.info("Bucket name from event: {}", record.getS3().getBucket().getName());
+            logger.info("Object key from event: {}", record.getS3().getObject().getKey());
+        }
+
+        Context context = Mockito.mock(Context.class);
+        App handler = new App();
+        String response = handler.handleRequest(event, context);
+        assertEquals(event, response);
     }
 
     @Test
@@ -81,9 +103,9 @@ public class AppTest {
 
         S3EventNotification.S3Entity s3Entity = new S3EventNotification.S3Entity(
                 "1.0",
-                new S3EventNotification.S3BucketEntity("piping-control-2025",
+                new S3EventNotification.S3BucketEntity("control-piping-2025",
                         new S3EventNotification.UserIdentityEntity("EXAMPLE"),
-                        "arn:aws:s3:::piping-control-2025"),
+                        "arn:aws:s3:::control-piping-2025"),
                 new S3EventNotification.S3ObjectEntity("support/source/test-file.xlsx", 1024L,
                         "0123456789abcdef0123456789abcdef", "1.0", ""),
                 "configId"
@@ -128,9 +150,9 @@ public class AppTest {
         // Create test S3 event for non-Excel file
         S3EventNotification.S3Entity s3Entity = new S3EventNotification.S3Entity(
                 "1.0",
-                new S3EventNotification.S3BucketEntity("piping-control-2025",
+                new S3EventNotification.S3BucketEntity("control-piping-2025",
                         new S3EventNotification.UserIdentityEntity("EXAMPLE"),
-                        "arn:aws:s3:::piping-control-2025"),
+                        "arn:aws:s3:::control-piping-2025"),
                 new S3EventNotification.S3ObjectEntity("support/source/test-file.txt", 1024L,
                         "0123456789abcdef0123456789abcdef", "1.0", ""),
                 "configId"
@@ -163,9 +185,9 @@ public class AppTest {
         // Create test S3 event for file in wrong folder
         S3EventNotification.S3Entity s3Entity = new S3EventNotification.S3Entity(
                 "1.0",
-                new S3EventNotification.S3BucketEntity("piping-control-2025",
+                new S3EventNotification.S3BucketEntity("control-piping-2025",
                         new S3EventNotification.UserIdentityEntity("EXAMPLE"),
-                        "arn:aws:s3:::piping-control-2025"),
+                        "arn:aws:s3:::control-piping-2025"),
                 new S3EventNotification.S3ObjectEntity("wrong/folder/test-file.xlsx", 1024L,
                         "0123456789abcdef0123456789abcdef", "1.0", ""),
                 "configId"

@@ -160,7 +160,7 @@
                   <environmentVariables>
                       <AWS_REGION>us-east-1</AWS_REGION>
                       <SHEET_NAME>Estandar</SHEET_NAME>
-                      <BUCKET_NAME>piping-2025</BUCKET_NAME>
+                      <BUCKET_NAME>control-piping-2025</BUCKET_NAME>
                       <FOLDER_SOURCE_PATH>support/source/</FOLDER_SOURCE_PATH>
                       <FOLDER_DESTINATION_PATH>support/destination/</FOLDER_DESTINATION_PATH>
                       <SKIP_ROW>0</SKIP_ROW>

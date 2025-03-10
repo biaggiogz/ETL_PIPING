@@ -18,7 +18,12 @@ import com.amazonaws.services.lambda.runtime.Context;
 import com.amazonaws.services.lambda.runtime.RequestHandler;
 import com.amazonaws.services.lambda.runtime.events.S3Event;
 import com.amazonaws.services.lambda.runtime.events.models.s3.S3EventNotification.S3EventNotificationRecord;
+import org.apache.poi.openxml4j.opc.OPCPackage;
 import org.apache.poi.ss.usermodel.*;
+import org.apache.poi.xssf.streaming.SXSSFRow;
+import org.apache.poi.xssf.streaming.SXSSFSheet;
+import org.apache.poi.xssf.streaming.SXSSFWorkbook;
+import org.apache.poi.xssf.usermodel.XSSFSheet;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import software.amazon.awssdk.core.ResponseInputStream;
 import software.amazon.awssdk.core.sync.RequestBody;
@@ -49,6 +54,7 @@ public class App implements RequestHandler<S3Event, String> {
             S3EventNotificationRecord record = event.getRecords().get(0);
             String sourceBucket = record.getS3().getBucket().getName();
             String sourceKey = record.getS3().getObject().getUrlDecodedKey();
+            //String bucket_name = "control-piping-2025";
             if (!bucket_name.equals(sourceBucket)){
                 logger.warn("Bucket {} is not the expected bucket, skipping processing", sourceBucket);
                 return "Bucket is not the expected bucket, skipping processing";
@@ -75,14 +81,12 @@ public class App implements RequestHandler<S3Event, String> {
                 StringBuilder csvContent = new StringBuilder();
 
                 try (InputStream fis = s3ObjectResponse; // Use InputStream instead of FileInputStream
-                     Workbook workbook = new XSSFWorkbook(fis)) {
-
-                    logger.info("Received workbook: logger {}", event);
-                    Sheet sheet = workbook.getSheet(sheet_name);
+                     XSSFWorkbook workbook = new XSSFWorkbook(fis);
+                ) {
+                    XSSFSheet sheet = workbook.getSheet(sheet_name);
                     if (sheet == null) {
                         throw new IllegalArgumentException("Sheet " + sheet_name + " not found");
                     }
-
                     Iterator<Row> rowIterator = StreamSupport
                             .stream(sheet.spliterator(), false)
                             .skip(skip_row)
@@ -94,6 +98,8 @@ public class App implements RequestHandler<S3Event, String> {
                         for (int i = 0; i < row.getLastCellNum(); i++) {
                             Cell cell = row.getCell(i, Row.MissingCellPolicy.CREATE_NULL_AS_BLANK);
                             String cellValue = getCellValueAsString(cell);
+                            cellValue = cellValue.trim().replace("\u00A0", "");
+
 
                             // Escape special characters and quotes
                             if (cellValue.contains(CSV_DELIMITER) || cellValue.contains("\"") || cellValue.contains("\n")) {
@@ -106,7 +112,9 @@ public class App implements RequestHandler<S3Event, String> {
                             }
                         }
                         csvContent.append(rowContent).append("\n");
+
                     }
+
                 }
 
                 // Check if CSV content is empty
@@ -153,7 +161,21 @@ public class App implements RequestHandler<S3Event, String> {
             case BOOLEAN:
                 return String.valueOf(cell.getBooleanCellValue());
             case FORMULA:
-                return cell.getCellFormula();
+                // Get the cached formula result instead of the formula itself
+                CellType formulaResultType = cell.getCachedFormulaResultType();
+                switch (formulaResultType) {
+                    case STRING:
+                        return cell.getStringCellValue();
+                    case NUMERIC:
+                        if (DateUtil.isCellDateFormatted(cell)) {
+                            return cell.getLocalDateTimeCellValue().toString();
+                        }
+                        return String.valueOf(cell.getNumericCellValue());
+                    case BOOLEAN:
+                        return String.valueOf(cell.getBooleanCellValue());
+                    default:
+                        return "";
+                }
             default:
                 return "";
         }
