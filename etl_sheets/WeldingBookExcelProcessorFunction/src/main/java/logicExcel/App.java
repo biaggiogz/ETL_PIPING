@@ -10,7 +10,8 @@ import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
-import com.amazonaws.services.lambda.runtime.*;
+import com.amazonaws.services.lambda.runtime.Context;
+import com.amazonaws.services.lambda.runtime.RequestHandler;
 import com.amazonaws.services.lambda.runtime.events.APIGatewayProxyRequestEvent;
 import com.amazonaws.services.lambda.runtime.events.APIGatewayProxyResponseEvent;
 
@@ -40,7 +41,7 @@ public class App implements RequestHandler<S3Event, String> {
 
     @Override
     public String handleRequest(S3Event event, Context context) {
-        logger.info("Received S3 event: logger {}", event);
+        logger.info("Received S3 event: {}", event);
         if (event.getRecords() == null || event.getRecords().isEmpty()) {
             logger.error("No records found in event");
             return "No records found in event";
@@ -69,7 +70,7 @@ public class App implements RequestHandler<S3Event, String> {
                         getObjectRequest.bucket(),
                         getObjectRequest.key());
                 ResponseInputStream<GetObjectResponse> s3ObjectResponse = s3Client.getObject(getObjectRequest);
-                logger.info("Successfully retrieved object from S3  logger");
+                logger.info("Successfully retrieved object from S3");
 
                 // Initialize csvContent
                 StringBuilder csvContent = new StringBuilder();
@@ -77,12 +78,13 @@ public class App implements RequestHandler<S3Event, String> {
                 try (InputStream fis = s3ObjectResponse; // Use InputStream instead of FileInputStream
                      Workbook workbook = new XSSFWorkbook(fis)) {
 
-                    logger.info("Received workbook: logger {}", event);
                     Sheet sheet = workbook.getSheet(sheet_name);
+
                     if (sheet == null) {
                         throw new IllegalArgumentException("Sheet " + sheet_name + " not found");
                     }
 
+                    //Iterator<Row> rowIterator = sheet.iterator();
                     Iterator<Row> rowIterator = StreamSupport
                             .stream(sheet.spliterator(), false)
                             .skip(skip_row)
@@ -124,9 +126,7 @@ public class App implements RequestHandler<S3Event, String> {
 
                 s3Client.putObject(putObjectRequest,
                         RequestBody.fromString(csvContent.toString()));
-                logger.info("Successfully processed Excel file and converted to CSV: logger {}", event);
                 return "Successfully processed Excel file and converted to CSV";
-
             } else {
                 logger.warn("File {} is not an Excel file, skipping processing", sourceKey);
                 return "File is not an Excel file, skipping processing";

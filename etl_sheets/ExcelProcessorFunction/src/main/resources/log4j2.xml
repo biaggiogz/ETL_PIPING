@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Configuration status="WARN">
+    <Appenders>
+        <Console name="Lambda" target="SYSTEM_OUT">
+            <PatternLayout>
+                <pattern>{"timestamp":"%d{ISO8601}","level":"%p","loggerName":"%c","message":"%m","thread":"%t","requestId":"%X{AWSRequestId}"}%n</pattern>
+            </PatternLayout>
+        </Console>
+    </Appenders>
+    <Loggers>
+        <!-- Root logger -->
+        <Root level="INFO">
+            <AppenderRef ref="Lambda"/>
+        </Root>
+        <Logger name="software.amazon.awssdk.request" level="DEBUG" />
+        <!-- AWS SDK logging -->
+        <Logger name="software.amazon.awssdk" level="WARN"/>
+
+        <!-- Your application specific logger -->
+        <Logger name="logicExcel.App" level="INFO" additivity="false">
+            <AppenderRef ref="Lambda"/>
+        </Logger>
+    </Loggers>
+</Configuration>
