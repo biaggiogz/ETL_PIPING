@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+
+
+# Configure Spark classpath
+SPARK_CP="$SPARK_HOME/conf:$SPARK_HOME/jars/*"
+
+# Execute with proper signal handling
+exec /usr/lib/jvm/$java_path/jre/bin/java -cp /var/lang/lib/python3.9/site-packages/pyspark/conf/:/var/lang/lib/python3.9/site-packages/pyspark/jars/* -Xmx1g "$@"

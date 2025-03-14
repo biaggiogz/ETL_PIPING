@@ -1,0 +1,25 @@
+FROM public.ecr.aws/lambda/java:17
+
+WORKDIR "/task"
+COPY src/ src/
+COPY pom.xml ./
+
+RUN mvn -q clean install
+RUN mvn dependency:copy-dependencies -DincludeScope=compile
+
+#FROM public.ecr.aws/lambda/java:17
+
+COPY --from=build-image /task/target/classes /var/task/
+COPY --from=build-image /task/target/dependency /var/task/lib
+
+ENV SHEET_NAME="Estandar"
+ENV BUCKET_NAME="control-piping-2025"
+ENV FOLDER_SOURCE_PATH="support/source/"
+ENV FOLDER_DESTINATION_PATH="support/destination/"
+ENV JAVA_TOOL_OPTIONS="-XX:+TieredCompilation -XX:TieredStopAtLevel=1"
+ENV SKIP_ROW="0"
+
+# Command can be overwritten by providing a different command in the template directly.
+CMD ["logicExcel.App::handleRequest"]
+
+
