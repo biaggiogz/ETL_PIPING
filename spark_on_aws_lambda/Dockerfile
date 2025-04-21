@@ -1,5 +1,5 @@
 
-# Use AWS Lambda Python 3.9 image as base
+
 FROM public.ecr.aws/lambda/python:3.9.2025.03.11.15
 
 # Setting the compatible versions of libraries

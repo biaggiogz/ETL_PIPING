@@ -1,0 +1,86 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Template to deploy Lambda execution role and related resources'
+
+Parameters:
+  LambdaFunctionName:
+    Type: String
+    Description: Name of the Lambda function
+
+  BucketName:
+    Type: String
+    Description: Name of the S3 bucket
+
+  #DBNAME:
+    #Type: String
+    #Description: Name of the RDS database
+  #VPC:
+    #Type: AWS::EC2::VPC::Id
+    #Description: VPC where the Lambda function will be deployed
+
+
+Resources:
+  LambdaExecutionRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: Role-Lambda-Sheet-Support
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Policies:
+        - PolicyName: execution-role-policy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: 'Allow'
+                Action:
+                  - 'logs:CreateLogGroup'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${LambdaFunctionName}:*'
+              - Effect: 'Allow'
+                Action:
+                  - 's3:*'
+                Resource: !Sub 'arn:aws:s3:::${BucketName}/support/source/*'
+              - Effect: 'Allow'
+                Action:
+                  - 's3:*'
+                Resource: !Sub 'arn:aws:s3:::${BucketName}/support/destination/*'
+              #- Effect: 'Allow'
+                #Action:
+                  #- 'rds-db:connect'
+                #Resource: !Sub 'arn:aws:rds:${AWS::Region}:${AWS::AccountId}:db:${DBNAME}'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+
+  #LambdaSecurityGroup:
+    #Type: AWS::EC2::SecurityGroup
+    #Properties:
+      #GroupDescription: Security group for Lambda function
+      #VpcId: !Ref VPC
+      #SecurityGroupEgress:
+        #- IpProtocol: -1
+          #FromPort: -1
+          #ToPort: -1
+          #CidrIp: 0.0.0.0/0
+
+Outputs:
+  LambdaRoleArn:
+    Description: ARN of the created IAM Role
+    Value: !GetAtt LambdaExecutionRole.Arn
+    Export:
+      Name: LambdaExecutionRoleArn
+  LambdaRoleName:
+    Description: Name of the created IAM Role
+    Value: !Ref LambdaExecutionRole
+
+  #LambdaSecurityGroup:
+    #Description: Security group for Lambda function
+    #Value: !Ref LambdaSecurityGroup
+    #Export:
+      #Name: LambdaSecurityGroupId

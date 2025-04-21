@@ -1,0 +1,81 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: SAM template for cleanLoad_sheets Lambda function
+
+Globals:
+  Function:
+    Timeout: 60  # Maximum Lambda timeout
+    MemorySize: 1024
+
+Resources:
+  DependenciesLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: clean-load-sheets-layer
+      Description: packages for to connect to postgresql
+      ContentUri: s3://control-piping-2025/lambdaslayer/clean-load-sheets.zip
+      CompatibleRuntimes:
+        - python3.9
+
+  CleanLoadSheetsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Ref LambdaFunctionName
+      CodeUri: src/
+      Handler: app.lambda_handler
+      Runtime: python3.9
+      Architectures:
+        - x86_64
+      Layers:
+        - !Ref DependenciesLayer
+      Role: !ImportValue LambdaExecutionRoleArn
+      VpcConfig:
+        # If your database is in a VPC, you'll need this configuration
+        SecurityGroupIds:
+          - !ImportValue LambdaSecurityGroupId
+        SubnetIds:
+          - !Ref PublicSubnet1
+          - !Ref PublicSubnet2
+      Environment:
+        Variables:
+          ENDPOINT: !Ref ENDPOINT
+          PORT: !Ref PORT
+          USER: !Ref DBUsername
+          REGION: !Ref REGION
+          DBNAME: !Ref DBNAME
+          DESTINATION_BUCKETNAME: !Ref BucketName
+
+Parameters:
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet::Id
+    Description: First private subnet for Lambda function
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet::Id
+    Description: Second private subnet for Lambda function
+  ENDPOINT:
+    Type: String
+    Description: The endpoint of your RDS instance.
+  PORT:
+    Type: Number
+    Description: The port of your RDS instance.
+  REGION:
+    Type: String
+    Description: The region where your RDS instance is located.
+  DBNAME:
+    Type: String
+    Description: The name of your database.
+  BucketName:
+    Type: String
+    Description: The name of the destination S3 bucket.
+  DBUsername:
+    Type: String
+    Description: The username for your RDS database.
+  LambdaFunctionName:
+    Type: String
+    Description: The name of the Lambda function.
+
+Outputs:
+  CleanLoadSheetsFunction:
+    Description: cleanLoad_sheets Lambda Function ARN
+    Value: !GetAtt CleanLoadSheetsFunction.Arn
