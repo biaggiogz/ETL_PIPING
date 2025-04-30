@@ -15,7 +15,6 @@ import numpy as np
 import socket
 from psycopg2 import sql
 from botocore.exceptions import ClientError
-
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -36,6 +35,8 @@ SOURCE_NAME=os.getenv('SOURCE_NAME')
 SCHEMA_NAME=os.getenv('SCHEMA_NAME')
 COLUMNS_TO_MASTER_STR=os.getenv('COLUMNS_TO_MASTER')
 COLUMNS_TO_MASTER=COLUMNS_TO_MASTER_STR.split(',')  if COLUMNS_TO_MASTER_STR else []
+
+
 
 def setup_logger(name: str = None) -> logging.Logger:
     logger = logging.getLogger(name)
@@ -208,15 +209,17 @@ def format_value(val):
     return str(val)
 
 def transformationsETL(df):
-
-
-    df = df[df['id_line'].notna()]
-    df = df.copy()
-    df['spool'] = df['spool'].replace('-', np.nan)
-
-    df['e3did'] = '/' + df[['area', 'dn', 'line_fluid', 'id_line', 'specification', 'ins_trac_tren']].applymap(format_value).agg('-'.join, axis=1)
+    # df['rw'] = df.groupby(['E3DID', 'SUPPORTID', 'SUPPORTMARKALL']).cumcount() + 1
     df['record'] = df.groupby(['e3did']).cumcount() + 1
 
+    df = df[df['e3did'].notna()]
+
+
+    # def create_hash(row):
+    #     concat_string = f"{row['E3DID']}||{row['SUPPORTID']}||{row['SUPPORTMARKALL']}"
+    #     return hashlib.sha256(concat_string.encode()).hexdigest()
+    #
+    # df['ID_DB'] = df.apply(create_hash, axis=1)
     return df
 
 def dropTableIFExist(cur):
@@ -483,3 +486,4 @@ def lambda_handler(event, context):
             'statusCode': 500,
             'body': json.dumps(f'Error: {str(e)}')
         }
+

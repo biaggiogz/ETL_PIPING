@@ -2,11 +2,11 @@ AWSTemplateFormatVersion: '2010-09-09'
 Transform: 'AWS::Serverless-2016-10-31'
 Metadata:
   'AWS::ServerlessRepo::Application':
-    Name: rds-wb-etl
+    Name: rds-excel-support
     Labels:
       - piping
       - lambda
-      - rds-wb-etl
+      - rds-support-etl
     SemanticVersion: 1.2.0
 Parameters:
   ImageUri:
@@ -94,8 +94,8 @@ Resources:
                 Action:
                   - 's3:*'
                 Resource:
-                  - !Sub 'arn:aws:s3:::${BucketName}/weldingbook/destination/*'
-                  - !Sub 'arn:aws:s3:::${BucketName}/weldingbook/processed/*'
+                  - !Sub 'arn:aws:s3:::${BucketName}/support/destination/*'
+                  - !Sub 'arn:aws:s3:::${BucketName}/support/processed/*'
         - PolicyName: 'RDSAccess'
           PolicyDocument:
             Version: '2012-10-17'
@@ -132,7 +132,7 @@ Resources:
                   - 'sns:Publish'
                 Resource:
                   - !Sub 'arn:aws:sns:${AWS::Region}:${AWS::AccountId}:SuccessFullWeldingBook'
-                  - !Sub 'arn:aws:sns:${AWS::Region}:${AWS::AccountId}:FailureWeldingBook'
+                  - !Sub 'arn:aws:sns:${AWS::Region}:${AWS::AccountId}:FailureSupportBook'
 
 
   LambdaFunction:

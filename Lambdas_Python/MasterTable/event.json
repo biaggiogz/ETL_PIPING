@@ -1,0 +1,13 @@
+{
+  "detail":{
+    "source_name":"WB",
+    "schema_name":"user_01",
+    "table_name":"wb",
+    "columns":[
+      "record",
+      "e3did",
+      "total",
+      "date_execut"
+    ]
+  }
+}

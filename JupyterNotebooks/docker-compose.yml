@@ -1,0 +1,10 @@
+version: "2"
+services:
+  jupyter:
+    image: jupyterhub:01
+    ports:
+      - "30000:8888"
+    volumes:
+      - .:/notebook
+
+#http://127.0.0.1:30000/?token=snip
