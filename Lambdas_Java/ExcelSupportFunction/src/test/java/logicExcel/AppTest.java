@@ -1,0 +1,238 @@
+package logicExcel;
+
+import com.amazonaws.services.lambda.runtime.Context;
+import com.amazonaws.services.lambda.runtime.LambdaLogger;
+import com.amazonaws.services.lambda.runtime.events.S3Event;
+import com.amazonaws.services.lambda.runtime.events.models.s3.S3EventNotification;
+import com.amazonaws.services.lambda.runtime.tests.annotations.Event;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.poi.ss.usermodel.Row;
+import org.apache.poi.ss.usermodel.Sheet;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.api.extension.RegisterExtension;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.mockito.Mock;
+import org.mockito.Mockito;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.test.context.TestContext;
+import software.amazon.awssdk.core.ResponseBytes;
+import software.amazon.awssdk.core.ResponseInputStream;
+import software.amazon.awssdk.core.sync.RequestBody;
+import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.GetObjectRequest;
+import software.amazon.awssdk.services.s3.model.GetObjectResponse;
+import software.amazon.awssdk.services.s3.model.PutObjectRequest;
+import software.amazon.awssdk.services.s3.model.PutObjectResponse;
+
+import java.io.*;
+
+import org.springframework.test.util.ReflectionTestUtils;
+
+import java.lang.reflect.Field;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.time.Instant;
+import java.util.Collections;
+import java.util.List;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.*;
+
+@ExtendWith(MockitoExtension.class)
+public class AppTest {
+    private static final Logger logger = LoggerFactory.getLogger(AppTest.class);
+    @Mock
+    private Context context;
+
+    @Mock
+    private S3Client s3Client;
+
+    private App app;
+
+    @BeforeEach
+    void setUp() {
+        app = new App();
+        ReflectionTestUtils.setField(app, "s3Client", s3Client);
+        // Set up environment variables for testing
+        System.setProperty("EXPECTED_ACCOUNT_ID","881490115226");
+        System.setProperty("BUCKET_NAME", "control-piping-2025");
+        System.setProperty("SHEET_NAME", "Estandar");
+        System.setProperty("FOLDER_SOURCE_PATH", "support/source/");
+        System.setProperty("FOLDER_DESTINATION_PATH", "support/destination/");
+        System.setProperty("COLUMNS_TO_TRIM","NM REV,E3DID,SUPPORTID,ESTADO DE FABRICACION NUEVO FORMATO,FECHA,MONTAJE,FECHA2,TESTPACKASOCIADO");
+    }
+
+
+
+    @ParameterizedTest
+    @Event(value = "src/test/resources/event.json", type = S3Event.class)
+    void testS3(S3Event event) {
+        logger.info("Invoke TEST - S3");
+        logger.info("Event records size: {}", event.getRecords().size());
+        if (!event.getRecords().isEmpty()) {
+            S3EventNotification.S3EventNotificationRecord record = event.getRecords().get(0);
+            logger.info("Bucket name from event: {}", record.getS3().getBucket().getName());
+            logger.info("Object key from event: {}", record.getS3().getObject().getKey());
+        }
+
+        Context context = Mockito.mock(Context.class);
+        App handler = new App();
+        String response = handler.handleRequest(event, context);
+        //assertEquals(event, response);
+        assertEquals("Successfully processed Excel file and converted to CSV", response);
+    }
+
+    @Test
+    void testHandleRequest_WithValidExcelFile() throws IOException {
+
+        XSSFWorkbook workbook = new XSSFWorkbook();
+        Sheet sheet = workbook.createSheet("Estandar");
+        Row row = sheet.createRow(0);
+        row.createCell(0).setCellValue("Test Data");
+
+        ByteArrayOutputStream bos = new ByteArrayOutputStream();
+        workbook.write(bos);
+        byte[] excelBytes = bos.toByteArray();
+        workbook.close();
+        bos.close();
+
+        S3EventNotification.S3Entity s3Entity = new S3EventNotification.S3Entity(
+                "1.0",
+                new S3EventNotification.S3BucketEntity("control-piping-2025",
+                        new S3EventNotification.UserIdentityEntity("EXAMPLE"),
+                        "arn:aws:s3:::control-piping-2025"),
+                new S3EventNotification.S3ObjectEntity("support/source/TEIGA_TMI_ADISSEO_CONTROL_AVANCE_SOPORTACION.xlsx", 1024L,
+                        "0123456789abcdef0123456789abcdef", "1.0", ""),
+                "configId"
+        );
+        S3EventNotification.S3EventNotificationRecord record = new S3EventNotification.S3EventNotificationRecord(
+                "us-east-1",
+                "ObjectCreated:Put",
+                "aws:s3",
+                Instant.parse("2023-12-20T12:00:00.000Z").toString(),
+                "2.1",
+                null,
+                null,
+                s3Entity,
+                null
+        );
+        S3Event event = new S3Event(Collections.singletonList(record));
+
+        ResponseInputStream<GetObjectResponse> responseInputStream =
+                new ResponseInputStream<>(
+                        GetObjectResponse.builder().build(),
+                        new ByteArrayInputStream(excelBytes)
+                );
+
+        when(s3Client.getObject(any(GetObjectRequest.class))).thenReturn(responseInputStream);
+        when(s3Client.putObject(any(PutObjectRequest.class), any(RequestBody.class))).thenReturn(
+                PutObjectResponse.builder().build()
+        );
+
+
+        String result = app.handleRequest(event, context);
+
+        assertEquals("Successfully processed Excel file and converted to CSV", result);
+        verify(s3Client).getObject(any(GetObjectRequest.class));
+        verify(s3Client).putObject(any(PutObjectRequest.class), any(RequestBody.class));
+
+
+    }
+
+    @Test
+    void testHandleRequest_WithNonExcelFile() {
+        // Create test S3 event for non-Excel file
+        S3EventNotification.S3Entity s3Entity = new S3EventNotification.S3Entity(
+                "1.0",
+                new S3EventNotification.S3BucketEntity("control-piping-2025",
+                        new S3EventNotification.UserIdentityEntity("EXAMPLE"),
+                        "arn:aws:s3:::control-piping-2025"),
+                new S3EventNotification.S3ObjectEntity("support/source/TEIGA_TMI_ADISSEO_CONTROL_AVANCE_SOPORTACION.csv", 1024L,
+                        "0123456789abcdef0123456789abcdef", "1.0", ""),
+                "configId"
+        );
+
+        S3EventNotification.S3EventNotificationRecord record = new S3EventNotification.S3EventNotificationRecord(
+                "us-east-1",
+                "ObjectCreated:Put",
+                "aws:s3",
+                Instant.parse("2023-12-20T12:00:00.000Z").toString(),
+                "2.1",
+                null,
+                null,
+                s3Entity,
+                null
+        );
+
+        S3Event event = new S3Event(Collections.singletonList(record));
+
+        // Execute the test
+        String result = app.handleRequest(event, context);
+
+        // Verify the results
+        assertEquals("File is not an Excel file, skipping processing", result);
+        verify(s3Client, never()).getObject(any(GetObjectRequest.class));
+    }
+
+    @Test
+    void testHandleRequest_WithWrongSourceFolder() {
+        // Create test S3 event for file in wrong folder
+        S3EventNotification.S3Entity s3Entity = new S3EventNotification.S3Entity(
+                "1.0",
+                new S3EventNotification.S3BucketEntity("control-piping-2025",
+                        new S3EventNotification.UserIdentityEntity("EXAMPLE"),
+                        "arn:aws:s3:::control-piping-2025"),
+                new S3EventNotification.S3ObjectEntity("wrong/folder/TEIGA_TMI_ADISSEO_CONTROL_AVANCE_SOPORTACION.xlsx", 1024L,
+                        "0123456789abcdef0123456789abcdef", "1.0", ""),
+                "configId"
+        );
+
+        S3EventNotification.S3EventNotificationRecord record = new S3EventNotification.S3EventNotificationRecord(
+                "us-east-1",
+                "ObjectCreated:Put",
+                "aws:s3",
+                Instant.parse("2023-12-20T12:00:00.000Z").toString(),
+                "2.1",
+                null,
+                null,
+                s3Entity,
+                null
+        );
+
+        S3Event event = new S3Event(Collections.singletonList(record));
+
+        // Execute the test
+        String result = app.handleRequest(event, context);
+
+        // Verify the results
+        assertEquals("File is not in the source folder, skipping processing", result);
+        verify(s3Client, never()).getObject(any(GetObjectRequest.class));
+    }
+
+    @Test
+    void testHandleRequest_WithException() {
+        assertThrows(RuntimeException.class, () -> {
+            app.handleRequest(null, context);
+        });
+    }
+
+    @AfterEach
+    void tearDown() {
+        // Clean up environment variables
+        System.clearProperty("BUCKET_NAME");
+        System.clearProperty("SHEET_NAME");
+        System.clearProperty("FOLDER_SOURCE_PATH");
+        System.clearProperty("FOLDER_DESTINATION_PATH");
+        System.clearProperty("SKIP_ROW");
+        System.clearProperty("EXPECTED_ACCOUNT_ID");
+    }
+}
+

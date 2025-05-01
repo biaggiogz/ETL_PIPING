@@ -1,0 +1,256 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <groupId>logicExcel</groupId>
+    <artifactId>ExcelProcessorFunction</artifactId>
+    <version>1.0</version>
+    <packaging>jar</packaging>
+    <name>A sample Hello World created for SAM CLI.</name>
+    <properties>
+        <maven.compiler.source>17</maven.compiler.source>
+        <maven.compiler.target>17</maven.compiler.target>
+        <java.version>17</java.version>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+        <start-class>logicExcel.App</start-class>
+    </properties>
+
+    <dependencies>
+
+        <dependency>
+            <groupId>com.amazonaws</groupId>
+            <artifactId>aws-lambda-java-core</artifactId>
+            <version>1.2.2</version>
+        </dependency>
+    <dependency>
+        <groupId>com.amazonaws</groupId>
+        <artifactId>aws-lambda-java-log4j2</artifactId>
+        <version>1.6.0</version>
+        <scope>provided</scope>
+    </dependency>
+        <dependency>
+        <groupId>com.amazonaws</groupId>
+        <artifactId>aws-lambda-java-tests</artifactId>
+        <version>1.1.1</version>
+        </dependency>
+        <dependency>
+          <groupId>com.amazonaws</groupId>
+          <artifactId>aws-lambda-java-events</artifactId>
+          <version>3.11.0</version>
+        </dependency>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+            <version>2.0.9</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.logging.log4j</groupId>
+            <artifactId>log4j-slf4j2-impl</artifactId>
+            <version>2.24.3</version>
+           <!-- <exclusions>
+                <exclusion>
+                    <groupId>org.apache.logging.log4j</groupId>
+                    <artifactId>log4j-api</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.apache.logging.log4j</groupId>
+                    <artifactId>log4j-core</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.slf4j</groupId>
+                    <artifactId>slf4j-api</artifactId>
+                </exclusion>
+            </exclusions> -->
+        </dependency>
+        <!-- Log4j API -->
+        <dependency>
+            <groupId>org.apache.logging.log4j</groupId>
+            <artifactId>log4j-api</artifactId>
+            <version>2.24.3</version>
+        </dependency>
+        <!-- Log4j Core -->
+        <dependency>
+            <groupId>org.apache.logging.log4j</groupId>
+            <artifactId>log4j-core</artifactId>
+            <version>2.24.3</version>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>s3</artifactId>
+            <version>2.21.0</version>
+           <!-- <exclusions>
+                <exclusion>
+                    <groupId>org.slf4j</groupId>
+                    <artifactId>slf4j-api</artifactId>
+                </exclusion>
+            </exclusions> -->
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>5.9.2</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-core</artifactId>
+            <version>5.3.1</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-junit-jupiter</artifactId>
+            <version>5.3.1</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>2.18.2</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.poi</groupId>
+            <artifactId>poi</artifactId>
+            <version>5.2.3</version>
+          <!--  <exclusions>
+                <exclusion>
+                    <groupId>org.apache.logging.log4j</groupId>
+                    <artifactId>log4j-api</artifactId>
+                </exclusion>
+
+            </exclusions>  -->
+        </dependency>
+        <dependency>
+            <groupId>org.apache.poi</groupId>
+            <artifactId>poi-ooxml</artifactId>
+            <version>5.2.3</version>
+           <!-- <exclusions>
+                <exclusion>
+                    <groupId>org.apache.logging.log4j</groupId>
+                    <artifactId>log4j-api</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>commons-codec</groupId>
+                    <artifactId>commons-codec</artifactId>
+                </exclusion>
+            </exclusions>-->
+        </dependency>
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-test</artifactId>
+            <version>6.2.1</version>
+            <scope>test</scope>
+           <!-- <exclusions>
+                <exclusion>
+                    <groupId>commons-logging</groupId>
+                    <artifactId>commons-logging</artifactId>
+                </exclusion>
+            </exclusions>-->
+        </dependency>
+    </dependencies>
+
+    <dependencyManagement>
+        <dependencies>
+          <!--  <dependency>
+                <groupId>org.slf4j</groupId>
+                <artifactId>slf4j-api</artifactId>
+                <version>2.0.9</version>
+            </dependency>
+            <dependency>
+                <groupId>commons-codec</groupId>
+                <artifactId>commons-codec</artifactId>
+                <version>1.15</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.logging.log4j</groupId>
+                <artifactId>log4j-api</artifactId>
+                <version>2.24.3</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.logging.log4j</groupId>
+                <artifactId>log4j-core</artifactId>
+                <version>2.24.3</version>
+            </dependency> -->
+            <dependency>
+                <groupId>software.amazon.awssdk</groupId>
+                <artifactId>bom</artifactId>
+                <version>2.21.20</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        <!--    <dependency>
+                <groupId>software.amazon.awssdk</groupId>
+                <artifactId>endpoints-spi</artifactId>
+                <version>2.21.20</version>
+            </dependency>
+            <dependency>
+                <groupId>com.github.pjfanning</groupId>
+                <artifactId>excel-streaming-reader</artifactId>
+                <version>4.3.9</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.logging.log4j</groupId>
+                <artifactId>log4j-slf4j2-impl</artifactId>
+                <version>2.24.3</version>
+            </dependency>  -->
+        </dependencies>
+    </dependencyManagement>
+
+    <build>
+      <plugins>
+          <plugin>
+              <groupId>org.apache.maven.plugins</groupId>
+              <artifactId>maven-shade-plugin</artifactId>
+              <version>3.5.0</version>
+              <configuration>
+                  <createDependencyReducedPom>false</createDependencyReducedPom>
+                  <shadedArtifactAttached>true</shadedArtifactAttached>
+                  <shadedClassifierName>aws</shadedClassifierName>
+              </configuration>
+              <executions>
+                  <execution>
+                      <phase>package</phase>
+                      <goals>
+                          <goal>shade</goal>
+                      </goals>
+                  </execution>
+              </executions>
+          </plugin>
+        <plugin>
+              <groupId>org.apache.maven.plugins</groupId>
+              <artifactId>maven-surefire-plugin</artifactId>
+              <version>3.2.5</version>
+              <configuration>
+                  <skipTests>true</skipTests>
+                  <environmentVariables>
+                      <AWS_REGION>us-east-1</AWS_REGION>
+                      <SHEET_NAME>Estandar</SHEET_NAME>
+                      <BUCKET_NAME>piping-2025</BUCKET_NAME>
+                      <FOLDER_SOURCE_PATH>support/source/</FOLDER_SOURCE_PATH>
+                      <FOLDER_DESTINATION_PATH>support/destination/</FOLDER_DESTINATION_PATH>
+                      <SKIP_ROW>0</SKIP_ROW>
+                  </environmentVariables>
+              </configuration>
+        </plugin>
+          <plugin>
+              <groupId>org.apache.maven.plugins</groupId>
+              <artifactId>maven-enforcer-plugin</artifactId>
+              <version>3.5.0</version>
+            <!--  <executions>
+                  <execution>
+                      <id>enforce-dependency-convergence</id>
+                      <goals>
+                          <goal>enforce</goal>
+                      </goals>
+                      <configuration>
+                          <rules>
+                              <DependencyConvergence />
+                          </rules>
+                      </configuration>
+                  </execution>
+              </executions> -->
+          </plugin>
+      </plugins>
+    </build>
+</project>

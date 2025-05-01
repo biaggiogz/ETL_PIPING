@@ -1,0 +1,125 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Excel file processor Lambda function
+
+Globals:
+  Function:
+    LoggingConfig:
+      LogFormat: JSON
+    Tags:
+      Application: ExcelProcessor
+      Environment: !Ref AWS::StackName
+
+Parameters:
+  BucketName:
+    Type: String
+    Description: Name of the S3 bucket to monitor
+  SheetName:
+    Type: String
+    Description: Name of the sheet within the Excel file
+  FolderSourcePath:
+    Type: String
+    Description: Folder path to monitor for Excel files
+  FolderDestinationPath:
+    Type: String
+    Description: Folder path to save the CSV files
+
+Resources:
+  ProcessingBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref BucketName
+      NotificationConfiguration:
+        EventBridgeConfiguration:
+          EventBridgeEnabled: true
+
+  EventBridgeRole:
+    Type: AWS::IAM::Role
+    DependsOn: ProcessingBucket
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaRole
+
+  S3EventRule:
+    Type: AWS::Events::Rule
+    DependsOn:
+      - ProcessingBucket
+      - EventBridgeRole
+      - ExcelProcessorFunction
+    Properties:
+      Description: "Rule to capture S3 events and trigger Lambda"
+      State: ENABLED
+      EventPattern:
+        source:
+          - aws.s3
+        detail-type:
+          - "Object Created"
+        detail:
+          bucket:
+            name:
+              - !Ref ProcessingBucket
+          object:
+            key:
+              - prefix: !Ref FolderSourcePath
+              -  suffix: .xlsx
+      Targets:
+        - Arn: !GetAtt ExcelProcessorFunction.Arn
+          Id: "ProcessS3Event"
+          RoleArn: !GetAtt EventBridgeRole.Arn
+
+  ExcelProcessorFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: ProcessingBucket
+    Properties:
+      CodeUri: ExcelProcessorFunction
+      Handler: logicExcel.App::handleRequest
+      Runtime: java17
+      Timeout: 30
+      MemorySize: 1024
+      AutoPublishAlias: live
+      SnapStart:
+        ApplyOn: PublishedVersions
+      Architectures:
+        - arm64
+      Policies:
+        - S3FullAccessPolicy:
+            BucketName: !Ref BucketName
+      Environment:
+        Variables:
+          SHEET_NAME: !Ref SheetName
+          BUCKET_NAME: !Ref BucketName
+          FOLDER_SOURCE_PATH: !Ref FolderSourcePath
+          FOLDER_DESTINATION_PATH: !Ref FolderDestinationPath
+          JAVA_TOOL_OPTIONS: -XX:+TieredCompilation -XX:TieredStopAtLevel=1
+
+  LambdaInvokePermission:
+    Type: AWS::Lambda::Permission
+    DependsOn:
+      - ExcelProcessorFunction
+      - S3EventRule
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref ExcelProcessorFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt S3EventRule.Arn
+
+Outputs:
+  FunctionArn:
+    Description: ARN of the Lambda function
+    Value: !GetAtt ExcelProcessorFunction.Arn
+  FunctionName:
+    Description: Name of the Lambda function
+    Value: !Ref ExcelProcessorFunction
+  BucketName:
+    Description: Name of the created S3 bucket
+    Value: !Ref ProcessingBucket
+  EventRuleArn:
+    Description: ARN of the EventBridge rule
+    Value: !GetAtt S3EventRule.Arn

@@ -1,0 +1,145 @@
+private static final Map<String, String> HEADER_MAPPINGS = new HashMap<>() {{
+    put("NM\nREV.", "NM REV");
+    put("NM REV.", "NM REV");
+    put("SUPPORTMARK\nor\nSIKLATYPE", "SUPPORTMARK or SIKLATYPE");
+    put("DATA/BOM", "DATA BOM");
+    // Add more mappings as needed
+}};
+
+private void processExcelFileInMemory(String sourceBucket, String sourceKey, String csvKey) throws IOException {
+    // ... existing code ...
+
+    try (InputStream excelInputStream = new ByteArrayInputStream(objectBytes.asByteArray());
+         Workbook workbook = new XSSFWorkbook(excelInputStream);
+         ByteArrayOutputStream csvOutputStream = new ByteArrayOutputStream();
+         OutputStreamWriter writer = new OutputStreamWriter(csvOutputStream)) {
+
+        Sheet sheet = workbook.getSheet(SHEET_NAME);
+        if (sheet == null) {
+            throw new IllegalArgumentException("Sheet " + SHEET_NAME + " not found");
+        }
+
+        // Process and normalize headers first
+        Row headerRow = sheet.getRow(0);
+        if (headerRow == null) {
+            throw new IllegalArgumentException("Header row not found");
+        }
+
+        List<String> normalizedHeaders = normalizeHeaders(headerRow);
+
+        // Write normalized headers
+        writer.write(String.join(CSV_DELIMITER, normalizedHeaders));
+        writer.write("\n");
+
+        // Process rest of the rows
+        Iterator<Row> rowIterator = StreamSupport
+                .stream(sheet.spliterator(), false)
+                .skip(SKIP_ROW)
+                .iterator();
+
+        // ... rest of your existing code ...
+    }
+}
+
+/**
+ * Normalizes headers from the Excel sheet
+ * @param headerRow The header row from the Excel sheet
+ * @return List of normalized header strings
+ */
+private List<String> normalizeHeaders(Row headerRow) {
+    List<String> normalizedHeaders = new ArrayList<>();
+
+    for (int i = 0; i < headerRow.getLastCellNum(); i++) {
+        Cell cell = headerRow.getCell(i, Row.MissingCellPolicy.CREATE_NULL_AS_BLANK);
+        String headerValue = getCellValueAsString(cell);
+        String normalizedHeader = normalizeHeaderValue(headerValue);
+        normalizedHeaders.add(normalizedHeader);
+    }
+
+    return normalizedHeaders;
+}
+
+/**
+ * Normalizes a single header value
+ * @param headerValue The original header value
+ * @return Normalized header string
+ */
+private String normalizeHeaderValue(String headerValue) {
+    if (headerValue == null || headerValue.trim().isEmpty()) {
+        return "";
+    }
+
+    // First check if we have a direct mapping
+    String normalized = HEADER_MAPPINGS.get(headerValue);
+    if (normalized != null) {
+        return normalized;
+    }
+
+    // Apply normalization rules
+    String result = headerValue
+        // Remove extra whitespace
+        .trim()
+        // Replace multiple spaces with single space
+        .replaceAll("\\s+", " ")
+        // Replace various newline characters
+        .replaceAll("[\n\r]+", " ")
+        // Replace non-breaking spaces
+        .replace("\u00A0", " ")
+        // Replace multiple forward slashes with space
+        .replaceAll("/+", " ")
+        // Replace multiple backslashes with space
+        .replaceAll("\\\\+", " ")
+        // Replace multiple hyphens with single space
+        .replaceAll("-+", " ")
+        // Replace multiple underscores with single space
+        .replaceAll("_+", " ")
+        // Remove any remaining special characters
+        .replaceAll("[^a-zA-Z0-9\\s]", " ")
+        // Trim again and normalize spaces
+        .trim()
+        .replaceAll("\\s+", " ");
+
+    // Check if the normalized version exists in mappings
+    normalized = HEADER_MAPPINGS.get(result);
+    return normalized != null ? normalized : result;
+}
+
+/**
+ * Validates if all required headers are present
+ * @param headers List of normalized headers
+ * @throws IllegalArgumentException if required headers are missing
+ */
+private void validateHeaders(List<String> headers) {
+    List<String> requiredHeaders = Arrays.asList(
+        "NM REV",
+        "SUPPORTMARK or SIKLATYPE",
+        "DATA BOM"
+        // Add other required headers
+    );
+
+    List<String> missingHeaders = requiredHeaders.stream()
+        .filter(required -> !headers.contains(required))
+        .collect(Collectors.toList());
+
+    if (!missingHeaders.isEmpty()) {
+        throw new IllegalArgumentException("Missing required headers: " + String.join(", ", missingHeaders));
+    }
+}
+
+/**
+ * Creates a mapping of original column indices to normalized column indices
+ * @param originalHeaders The original headers
+ * @param normalizedHeaders The normalized headers
+ * @return Map of column index mappings
+ */
+private Map<Integer, Integer> createColumnMapping(List<String> originalHeaders, List<String> normalizedHeaders) {
+    Map<Integer, Integer> columnMapping = new HashMap<>();
+    for (int i = 0; i < originalHeaders.size(); i++) {
+        String normalizedHeader = normalizeHeaderValue(originalHeaders.get(i));
+        int normalizedIndex = normalizedHeaders.indexOf(normalizedHeader);
+        if (normalizedIndex != -1) {
+            columnMapping.put(i, normalizedIndex);
+        }
+    }
+    return columnMapping;
+}

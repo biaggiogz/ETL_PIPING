@@ -1,0 +1,59 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Template to deploy Lambda execution role and related resources'
+
+Parameters:
+  LambdaFunctionName:
+    Type: String
+    Description: Name of the Lambda function
+
+  BucketName:
+    Type: String
+    Description: Name of the S3 bucket
+
+Resources:
+  LambdaExecutionRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: Role-Lambda-Sheet-Support
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+      Policies:
+        - PolicyName: s3-access-policy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: 'Allow'
+                Action:
+                  - 's3:GetObject'
+                  - 's3:PutObject'
+                  - 's3:ListBucket'
+                Resource:
+                  - !Sub 'arn:aws:s3:::${BucketName}'
+                  - !Sub 'arn:aws:s3:::${BucketName}/support/source/*'
+                  - !Sub 'arn:aws:s3:::${BucketName}/support/destination/*'
+
+Outputs:
+  LambdaRoleArn:
+    Description: ARN of the created IAM Role
+    Value: !GetAtt LambdaExecutionRole.Arn
+    Export:
+      Name: LambdaExecutionRoleArn
+  LambdaRoleName:
+    Description: Name of the created IAM Role
+    Value: !Ref LambdaExecutionRole
+    Export:
+      Name: LambdaExecutionRoleName
+  LambdaFunctionName:
+    Description: Name of the Lambda function
+    Value: !Ref LambdaFunctionName
+    Export:
+      Name: LambdaFunctionName

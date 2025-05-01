@@ -1,0 +1,39 @@
+{
+  "Records": [
+    {
+      "eventVersion": "2.1",
+      "eventSource": "aws:s3",
+      "awsRegion": "us-east-1",
+      "eventTime": "2025-03-10T21:36:07.622Z",
+      "eventName": "ObjectCreated:Put",
+      "userIdentity": {
+        "principalId": "AWS:AROAEXAMPLE"
+      },
+      "requestParameters": {
+        "sourceIPAddress": "192.0.2.1"
+      },
+      "responseElements": {
+        "x-amz-request-id": "EXAMPLE123456789",
+        "x-amz-id-2": "EXAMPLE123456789"
+      },
+      "s3": {
+        "s3SchemaVersion": "1.0",
+        "configurationId": "testConfigRule",
+        "bucket": {
+          "name": "control-piping-2025",
+          "ownerIdentity": {
+            "principalId": "EXAMPLE"
+          },
+          "arn": "arn:aws:s3:::control-piping-2025"
+        },
+        "object": {
+          "key": "weldingbook/source/23TEIGA-00000-ML-B1304-6800-0711-0001-30-04-25.xlsx",
+          "size": 1024,
+          "eTag": "0123456789abcdef",
+          "sequencer": "0060A2A1537457E05"
+        }
+      }
+    }
+  ]
+}
+

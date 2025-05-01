@@ -1,0 +1,13 @@
+version = 0.1
+[iam.global.parameters]
+stack_name = "Role-Lambda-Sheet-Support"
+
+[iam.deploy.parameters]
+resolve_s3 = true
+s3_prefix = "Role-Lambda-Sheet-Support"
+region = "us-east-1"
+confirm_changeset = true
+capabilities = "CAPABILITY_NAMED_IAM"
+parameter_overrides = "LambdaFunctionName=\"Java-Lambda-Sheet-Support\" BucketName=\"control-piping-2025\""
+image_repositories = []
+template_file = "role.yaml"

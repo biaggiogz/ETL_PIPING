@@ -1,0 +1,168 @@
+package logicExcel;
+
+import com.amazonaws.services.lambda.runtime.Context;
+import com.amazonaws.services.lambda.runtime.RequestHandler;
+import com.amazonaws.services.lambda.runtime.events.S3Event;
+import com.amazonaws.services.lambda.runtime.events.models.s3.S3EventNotification.S3EventNotificationRecord;
+import org.apache.poi.ss.usermodel.*;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import software.amazon.awssdk.core.ResponseBytes;
+import software.amazon.awssdk.core.sync.RequestBody;
+import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.GetObjectRequest;
+import software.amazon.awssdk.services.s3.model.PutObjectRequest;
+
+import java.io.*;
+import java.util.Iterator;
+import java.util.Locale;
+import java.util.stream.StreamSupport;
+
+public class App implements RequestHandler<S3Event, String> {
+    private static final Logger logger = LoggerFactory.getLogger(App.class);
+    private final S3Client s3Client = S3Client.builder().build();
+
+    private static final String SHEET_NAME = System.getenv("SHEET_NAME");
+    private static final String BUCKET_NAME = System.getenv("BUCKET_NAME");
+    private static final String FOLDER_SOURCE_PATH = System.getenv("FOLDER_SOURCE_PATH");
+    private static final String FOLDER_DESTINATION_PATH = System.getenv("FOLDER_DESTINATION_PATH");
+    private static final String CSV_DELIMITER = ",";
+    private static final String EMPTY_STRING = "";
+    private static final int SKIP_ROW = Integer.parseInt(System.getenv("SKIP_ROW"));
+    private static final String ENCODING = "UTF-8";
+    private static final String EXPECTED_ACCOUNT_ID = System.getenv("EXPECTED_ACCOUNT_ID");
+    @Override
+    public String handleRequest(S3Event event, Context context) {
+        if (event == null || event.getRecords() == null || event.getRecords().isEmpty()) {
+//            throw new IllegalArgumentException("Event cannot be null or empty");
+            logger.error("No records found in event");
+            return "No records found in event";
+        }
+        try {
+            S3EventNotificationRecord record = event.getRecords().get(0);
+            String sourceBucket = record.getS3().getBucket().getName();
+            String sourceKey = record.getS3().getObject().getUrlDecodedKey();
+
+            if (!BUCKET_NAME.equals(sourceBucket)){
+                logger.warn("Bucket {} is not the expected bucket, skipping processing", sourceBucket);
+                return "Bucket is not the expected bucket, skipping processing";
+            }
+
+            if(!sourceKey.startsWith(FOLDER_SOURCE_PATH)){
+                logger.warn("File {} is not in the source folder, skipping processing", sourceKey);
+                return "File is not in the source folder, skipping processing";
+            }
+
+            if (sourceKey.toLowerCase(Locale.ENGLISH).endsWith(".xlsx")) {
+                logger.info("Processing Excel file: {}", sourceKey);
+
+                String fileName = sourceKey.substring(sourceKey.lastIndexOf("/") + 1);
+                String baseFileName = fileName.substring(0, fileName.lastIndexOf("."));
+
+                String csvKey = FOLDER_DESTINATION_PATH + baseFileName + ".csv";
+
+                processExcelFileInMemory(sourceBucket, sourceKey, csvKey);
+
+                return "Successfully processed Excel file and converted to CSV";
+            } else {
+                logger.warn("File {} is not an Excel file, skipping processing", sourceKey);
+                return "File is not an Excel file, skipping processing";
+            }
+
+        } catch (Exception e) {
+            logger.error("Error processing S3 event: ", e);
+            throw new RuntimeException("Error processing S3 event", e);
+        }
+    }
+
+    private void processExcelFileInMemory(String sourceBucket, String sourceKey, String csvKey) throws IOException {
+
+        // Download Excel file into memory
+        GetObjectRequest getObjectRequest = GetObjectRequest.builder()
+                .bucket(sourceBucket)
+                .key(sourceKey)
+                .build();
+        ResponseBytes<?> objectBytes = s3Client.getObjectAsBytes(getObjectRequest);
+
+        try (InputStream excelInputStream = new ByteArrayInputStream(objectBytes.asByteArray());
+             Workbook workbook = new XSSFWorkbook(excelInputStream);
+             ByteArrayOutputStream csvOutputStream = new ByteArrayOutputStream();
+             OutputStreamWriter writer = new OutputStreamWriter(csvOutputStream)) {
+
+            Sheet sheet = workbook.getSheet(SHEET_NAME);
+            if (sheet == null) {
+                throw new IllegalArgumentException("Sheet " + SHEET_NAME + " not found");
+            }
+
+
+
+            Iterator<Row> rowIterator = StreamSupport
+                    .stream(sheet.spliterator(), false)
+                    .skip(SKIP_ROW)
+                    .iterator();
+
+            while (rowIterator.hasNext()) {
+                Row row = rowIterator.next();
+                StringBuilder rowContent = new StringBuilder();
+                for (int i = 0; i < row.getLastCellNum(); i++) {
+                    Cell cell = row.getCell(i, Row.MissingCellPolicy.CREATE_NULL_AS_BLANK);
+                    String cellValue = getCellValueAsString(cell);
+
+                    if (cellValue.contains(CSV_DELIMITER) || cellValue.contains("\"") || cellValue.contains("\n")) {
+                        cellValue = "\"" + cellValue.replace("\"", "\"\"") + "\"";
+                    }
+
+                    rowContent.append(cellValue);
+                    if (i < row.getLastCellNum() - 1) {
+                        rowContent.append(CSV_DELIMITER);
+                    }
+                }
+                writer.write(rowContent.toString());
+                writer.write("\n");
+            }
+            writer.flush();
+
+            // Upload CSV file from memory
+            uploadToS3(sourceBucket, csvKey, csvOutputStream.toByteArray());
+        }
+    }
+
+    private String getCellValueAsString(Cell cell) {
+        if (cell == null) {
+            return EMPTY_STRING;
+        }
+        StringBuilder result = new StringBuilder(32);
+
+        switch (cell.getCellType()) {
+            case STRING:
+                return cell.getStringCellValue();
+            case NUMERIC:
+                if (DateUtil.isCellDateFormatted(cell)) {
+                    return cell.getLocalDateTimeCellValue().toString();
+                }
+                // Use StringBuilder append for numeric conversion
+                return result.append(cell.getNumericCellValue()).toString();
+            case BOOLEAN:
+                return result.append(cell.getBooleanCellValue()).toString();
+            case FORMULA:
+                return cell.getCellFormula();
+            default:
+                return "";
+        }
+    }
+
+    private void uploadToS3(String bucket, String key, byte[] contentBytes) {
+        PutObjectRequest putObjectRequest = PutObjectRequest.builder()
+                .bucket(bucket)
+                .key(key)
+                .contentType("text/csv")
+                .contentEncoding(ENCODING)
+                .expectedBucketOwner(EXPECTED_ACCOUNT_ID)
+                .build();
+
+        s3Client.putObject(putObjectRequest, RequestBody.fromBytes(contentBytes));
+
+        logger.info("Successfully uploaded CSV file to {}/{}", bucket, key);
+    }
+}

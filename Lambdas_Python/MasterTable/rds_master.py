@@ -17,7 +17,7 @@ import socket
 from psycopg2 import sql
 from botocore.exceptions import ClientError
 import datetime
-
+import functools
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -31,7 +31,7 @@ REGION=os.getenv('REGION')
 DBNAME=os.getenv('DBNAME')
 SECRET_NAME=os.getenv('SECRET_NAME')
 SUCCESS_SNS_TOPIC_ARN =os.getenv('SUCCESS_SNS_TOPIC_ARN')
-ERROR_SNS_TOPIC_ARN=os.getenv('ERROR_SNS_TOPIC_ARN')
+FAILURE_SNS_TOPIC_ARN=os.getenv('FAILURE_SNS_TOPIC_ARN')
 SCHEMA_NAME=os.getenv('SCHEMA_NAME')
 NAME_TABLE=os.getenv('NAME_TABLE')
 
@@ -49,8 +49,12 @@ def setup_logger(name: str = None) -> logging.Logger:
 
 logger = setup_logger(__name__)
 
+_credentials_cache={}
+_db_params_cache={}
+
 def check_environment():
-    required_vars = ['ENDPOINT', 'PORT', 'REGION', 'SECRET_NAME', 'DBNAME', 'SCHEMA_NAME']
+    logger.info("Checking environment variables...")
+    required_vars = ['ENDPOINT', 'PORT', 'REGION', 'SECRET_NAME', 'SUCCESS_SNS_TOPIC_ARN','FAILURE_SNS_TOPIC_ARN','DBNAME', 'SCHEMA_NAME','NAME_TABLE']
     missing_vars = [var for var in required_vars if not os.getenv(var)]
     if missing_vars:
         logger.error(f"Missing environment variables: {missing_vars}")
@@ -58,211 +62,113 @@ def check_environment():
     else:
         logger.info("All required environment variables are set.")
 
-def get_db_connection_params() -> Dict[str, str]:
-    required_params = ['ENDPOINT', 'PORT', 'DBNAME']
+def get_connection_pool():
+    logger.info("Getting database connection pool...")
+    from psycopg2.pool import SimpleConnectionPool
 
-    params = {}
-    for param in required_params:
-        value = os.environ.get(param)
-        if not value:
-            raise ValueError(f"Missing required environment variable: {param}")
-        params[param] = value
-
-    return params
-
-def get_secret(secret_name):
-
-    session = boto3.session.Session()
-    client = session.client(
-        service_name='secretsmanager',
-        region_name=REGION
-    )
-
-    try:
-        get_secret_value_response = client.get_secret_value(
-            SecretId=secret_name
-        )
-    except ClientError as e:
-        logger.error(f"Failed to retrieve secret: {e}")
-        raise
-    else:
-        if 'SecretString' in get_secret_value_response:
-            secret = json.loads(get_secret_value_response['SecretString'])
-            return secret
-        else:
-            raise ValueError("Secret value is not a string")
-
-def create_dataframe_from_event(conn, event_detail: Dict) -> pd.DataFrame:
-    logger.info(f"schema_name: {schema_name}, table_name: {table_name}, columns: {columns}")
-
-    try:
-        schema_name = event_detail['schema_name']
-        table_name = event_detail['table_name']
-        columns = event_detail['columns']
-
-        # query = f"SELECT {', '.join(columns)} FROM {schema_name}.source_{table_name}"
-
-        query = sql.SQL("SELECT {} FROM {}.{}").format(
-            sql.SQL(', ').join(map(sql.Identifier, columns)),
-            sql.Identifier(schema_name),
-            sql.Identifier(table_name)
-        )
-        df = pd.read_sql(query, conn)
-        return df
-    except Exception as e:
-        print(f"Error creating DataFrame from event: {str(e)}")
-        raise
-
-def get_dataframes(event_detail: Dict) -> Tuple[Optional[pd.DataFrame], Optional[pd.DataFrame]]:
-
-    source_name = event_detail['source_name']
-    df_a = df_b = None
-    db_params = get_db_connection_params()
-    conn = psycopg2.connect(
-        host=db_params['ENDPOINT'],
-        port=db_params['PORT'],
-        database=db_params['DBNAME'],
-        user=credentials['username'],
-        password=credentials['password'],
-        sslmode='require'
-    )
-    try:
-        if source_name == 'WB':
-            logger.info("Processing lambda WB trigger")
-            df_a = create_dataframe_from_event(conn,event_detail)
-            df_b = PREDEFINED_QUERIES['WB']()
-
-        elif source_name == 'SUPPORT':
-            logger.info("Processing lambda Support trigger")
-            df_b = create_dataframe_from_event(conn,event_detail)
-            df_a = PREDEFINED_QUERIES['SUPPORT']()
-
-        else:
-            print(f"Unknown source: {source_name}")
-            raise ValueError(f"Unknown source: {source_name}")
-
-        return df_a, df_b
-
-    except Exception as e:
-        print(f"Error in get_dataframes: {str(e)}")
-        raise
-
-# def send_table_info_event(source_name: str, columns: list, schema_name: str, table_name: str) -> dict:
-#
-#
-#     events_client = boto3.client('eventbridge')
-#
-#     event_detail = {
-#         'source_name': source_name,
-#         'columns': columns,
-#         'schema_name': schema_name,
-#         'table_name': table_name,
-#         'timestamp': datetime.utcnow().isoformat()
-#     }
-#
-#     try:
-#         response = events_client.put_events(
-#             Entries=[
-#                 {
-#                     'Source': 'custom.table.info',
-#                     'DetailType': 'TableInfoEvent',
-#                     'Detail': json.dumps(event_detail),
-#                     'EventBusName': 'default'
-#                 }
-#             ]
-#         )
-#
-#         if response['FailedEntryCount'] > 0:
-#             print(f"Failed to send event: {response['Entries']}")
-#             raise Exception("Failed to send event to EventBridge")
-#
-#         return response
-#
-#     except Exception as e:
-#         print(f"Error sending event: {str(e)}")
-#         raise
-def check_connection():
-    try:
+    if not hasattr(get_connection_pool, '_pool'):
         credentials = get_secret(os.environ.get("SECRET_NAME"))
-        logger.info("Credentials retrieved successfully.")
-
         db_params = get_db_connection_params()
-        logger.info("Attempting to connect to database...")
 
-        conn = psycopg2.connect(
+        get_connection_pool._pool = SimpleConnectionPool(
+            minconn=1,
+            maxconn=3,
             host=db_params['ENDPOINT'],
             port=db_params['PORT'],
             database=db_params['DBNAME'],
             user=credentials['username'],
             password=credentials['password'],
             sslmode='require',
-            connect_timeout=5  # Add timeout to avoid hanging
+            connect_timeout=5
         )
 
-        # Test the connection with a simple query
-        cur = conn.cursor()
-        cur.execute('SELECT 1')
-        result = cur.fetchone()
+    return get_connection_pool._pool
+
+def check_connection():
+    logger.info("Starting database connection check...")
+    try:
+        pool = get_connection_pool()
+        conn = pool.getconn()
+
+        with conn.cursor() as cur:
+            cur.execute('SELECT 1')
+            result = cur.fetchone()
+
+        pool.putconn(conn)
 
         if result and result[0] == 1:
             logger.info("Successfully connected to RDS database")
             return True
-        else:
-            logger.error("Connection test failed")
-            raise Exception("Database connection test failed")
 
-    except psycopg2.OperationalError as e:
-        logger.error(f"Unable to connect to database: {str(e)}")
+        logger.error("Connection test failed")
         return False
 
-    except Exception as e:
-        logger.error(f"Error establishing database connection: {str(e)}")
+    except (psycopg2.OperationalError, Exception) as e:
+        logger.error(f"Database connection error: {str(e)}")
+        return False
+
+@functools.lru_cache(maxsize=1)
+def get_db_connection_params() -> Dict[str, str]:
+    logger.info("Getting database connection parameters...")
+    required_params = ('ENDPOINT', 'PORT', 'DBNAME')
+    params = {param: os.environ.get(param) for param in required_params}
+
+    if not all(params.values()):
+        missing = [k for k, v in params.items() if not v]
+        error_msg = f"Missing required environment variables: {', '.join(missing)}"
+        logger.error(error_msg)
+        raise ValueError(error_msg)
+
+    logger.info("Successfully retrieved database connection parameters")
+    return  params
+
+@functools.lru_cache(maxsize=1)
+def get_secret(secret_name):
+    logger.info(f"Retrieving secret: {secret_name}")
+
+    if secret_name in _credentials_cache:
+        logger.info("Returning cached credentials")
+        return _credentials_cache[secret_name]
+
+    try:
+        client = boto3.client('secretsmanager', region_name=os.environ['REGION'])
+        response = client.get_secret_value(SecretId=secret_name)
+
+        if 'SecretString' not in response:
+            raise ValueError("Secret value is not a string")
+
+        secret = json.loads(response['SecretString'])
+        _credentials_cache[secret_name] = secret
+        return secret
+
+    except ClientError as e:
+        logger.error(f"Failed to retrieve secret: {e}")
         raise
 
-def get_lambda_ip():
-    try:
-        # Get the private IP address of the Lambda container
-        hostname = socket.gethostname()
-        private_ip = socket.gethostbyname(hostname)
-        return private_ip
-    except Exception as e:
-        return f"Error getting IP address: {str(e)}"
+def create_dataframe_from_event(conn, event_detail: Dict) -> pd.DataFrame:
+    schema_name = event_detail['schema_name']
+    table_name = event_detail['table_name']
+    columns = event_detail['columns']
 
-def create_dataframe_from_event(event_detail: Dict) -> pd.DataFrame:
-    """
-    Create DataFrame from event details using database connection
-    """
-    try:
-        credentials = get_secret(os.environ.get("SECRET_NAME"))
-        logger.info("Credentials retrieved successfully.")
-        db_params = get_db_connection_params()
+    logger.info(f"Creating DataFrame from event - schema_name: {schema_name}, table_name: {table_name}, columns: {columns}")
 
-        conn = psycopg2.connect(
-            host=db_params['ENDPOINT'],
-            port=db_params['PORT'],
-            database=db_params['DBNAME'],
-            user=credentials['username'],
-            password=credentials['password'],
-            sslmode='require'
+    try:
+        query = sql.SQL("SELECT {} FROM {}.{}").format(
+            sql.SQL(', ').join(map(sql.Identifier, columns)),
+            sql.Identifier(schema_name),
+            sql.Identifier(f"source_{table_name}")
         )
-
-        schema_name = event_detail['schema_name']
-        table_name = event_detail['table_name']
-        columns = event_detail['columns']
-
-        query = f"SELECT {', '.join(columns)} FROM {schema_name}.{table_name}"
-        df = pd.read_sql(query, conn)
-
-        conn.close()
+        query_str = query.as_string(conn)
+        logger.info(f"Executing query: {query_str}")
+        df = pd.read_sql(query_str, conn)
+        logger.info(f"Successfully created DataFrame with {len(df)} rows")
         return df
-
     except Exception as e:
         logger.error(f"Error creating DataFrame from event: {str(e)}")
-        if 'conn' in locals() and conn is not None:
-            conn.close()
         raise
 
 def get_predefined_query_df(query_type: str) -> pd.DataFrame:
+    logger.info(f"Getting predefined query DataFrame for type: {query_type}")
 
     try:
         credentials = get_secret(os.environ.get("SECRET_NAME"))
@@ -279,14 +185,14 @@ def get_predefined_query_df(query_type: str) -> pd.DataFrame:
         )
 
         queries = {
-            'Support': f"SELECT record, e3did, supportid, montaje FROM {SCHEMA_NAME}.source_support",
+            'SUPPORT': f"SELECT record, e3did, supportid, montaje FROM {SCHEMA_NAME}.source_support",
             'WB': f"SELECT record, e3did, total, date_execut FROM {SCHEMA_NAME}.source_wb"
         }
 
-        # Execute query
+        logger.info(f"Executing {query_type} query")
         df = pd.read_sql(queries[query_type], conn)
+        logger.info(f"Successfully retrieved {len(df)} rows for {query_type}")
 
-        # Close connection
         conn.close()
         return df
 
@@ -297,27 +203,27 @@ def get_predefined_query_df(query_type: str) -> pd.DataFrame:
         raise
 
 def get_dataframes(event_detail: Dict) -> Tuple[Optional[pd.DataFrame], Optional[pd.DataFrame]]:
-    """
-    Create both DataFrames based on the triggering source
-    """
+    logger.info("Starting get_dataframes process")
     source_name = event_detail['source_name']
     df_a = df_b = None
-
+    pool = get_connection_pool()
+    conn = pool.getconn()
     try:
         if source_name == 'WB':
             logger.info("Processing lambda WB trigger")
-            df_a = create_dataframe_from_event(event_detail)
-            df_b = get_predefined_query_df('WB')
+            df_a = create_dataframe_from_event(conn,event_detail)
+            df_b = get_predefined_query_df('SUPPORT')
 
         elif source_name == 'SUPPORT':
             logger.info("Processing lambda Support trigger")
-            df_b = create_dataframe_from_event(event_detail)
-            df_a = get_predefined_query_df('Support')
+            df_b = create_dataframe_from_event(conn,event_detail)
+            df_a = get_predefined_query_df('WB')
 
         else:
             logger.error(f"Unknown source: {source_name}")
             raise ValueError(f"Unknown source: {source_name}")
 
+        logger.info("Successfully retrieved both DataFrames")
         return df_a, df_b
 
     except Exception as e:
@@ -325,26 +231,31 @@ def get_dataframes(event_detail: Dict) -> Tuple[Optional[pd.DataFrame], Optional
         raise
 
 def create_table_master(df_a: pd.DataFrame, df_b: pd.DataFrame) -> pd.DataFrame:
+    logger.info("Creating master table from DataFrames")
+    try:
+        count_a = df_a.groupby('e3did')['record'].count().reset_index(name='count_a')
+        count_b = df_b.groupby('e3did')['record'].count().reset_index(name='count_b')
+        max_counts = pd.merge(count_a, count_b, on='e3did', how='outer').fillna(0)
+        max_counts['max_count'] = max_counts[['count_a', 'count_b']].max(axis=1)
 
-    count_a = df_a.groupby('e3did')['record'].count().reset_index(name='count_a')
-    count_b = df_b.groupby('e3did')['record'].count().reset_index(name='count_b')
-    max_counts = pd.merge(count_a, count_b, on='e3did', how='outer').fillna(0)
-    max_counts['max_count'] = max_counts[['count_a', 'count_b']].max(axis=1)
+        expanded = []
+        for _, row in max_counts.iterrows():
+            expanded.extend([(row['e3did'], i+1) for i in range(int(row['max_count']))])
 
-    expanded = []
-    for _, row in max_counts.iterrows():
-        expanded.extend([(row['e3did'], i+1) for i in range(int(row['max_count']))])
+        expanded_df = pd.DataFrame(expanded, columns=['e3did', 'record'])
 
-    expanded_df = pd.DataFrame(expanded, columns=['e3did', 'record'])
+        result = (
+            expanded_df
+            .merge(df_a, on=['e3did', 'record'], how='left')
+            .merge(df_b, on=['e3did', 'record'], how='left')
+        )
+        master_df = result.sort_values(['e3did', 'record']).reset_index(drop=True)
 
-    result= (
-        expanded_df
-        .merge(df_a, on=['e3did', 'record'], how='left')
-        .merge(df_b, on=['e3did', 'record'], how='left')
-    )
-    master_df = result.sort_values(['e3did', 'record']).reset_index(drop=True)
-
-    return master_df
+        logger.info(f"Successfully created master table with {len(master_df)} rows")
+        return master_df
+    except Exception as e:
+        logger.error(f"Error creating master table: {str(e)}")
+        raise
 
 def dropTableIFExist(cur):
     try:
@@ -355,7 +266,7 @@ def dropTableIFExist(cur):
             sql.Identifier(table_name)
         )
         cur.execute(query)
-        logger.info("Table dropped.")
+        logger.info("Table dropped successfully")
         return True
     except Exception as e:
         logger.error(f"Error dropping table: {str(e)}")
@@ -391,6 +302,7 @@ def createTable(cur, df_format, conn):
         )
 
         cur.execute(create_table_query)
+        logger.info("Table created successfully")
         return True
     except Exception as e:
         logger.error(f"Error creating table: {str(e)}")
@@ -399,6 +311,7 @@ def createTable(cur, df_format, conn):
 def loadData(cur, df_format, conn):
     try:
         if conn.closed:
+            logger.error("Database connection is closed")
             raise Exception("Database connection is closed")
 
         logger.info(f"Loading data into source_{NAME_TABLE}...")
@@ -418,67 +331,90 @@ def loadData(cur, df_format, conn):
         )
         cur.copy_expert(copy_sql, buffer)
         conn.commit()
-        logger.info("Data successfully loaded into database.")
-        send_sns_notification(
-            success=True,
-            details=f"Successfully loaded {len(df_format)} records into {full_table}"
-        )
+        logger.info(f"Successfully loaded {len(df_format)} records into {full_table}")
+        # send_sns_notification(
+        #     success=True,
+        #     details=f"Successfully loaded {len(df_format)} records into {full_table}"
+        # )
         return True
     except Exception as e:
         logger.error(f"Error loading data support to table user_01.source_{NAME_TABLE}: {str(e)}")
         if not conn.closed:
             conn.rollback()
-        send_sns_notification(
-            success=False,
-            details=str(e)
-        )
+        # send_sns_notification(
+        #     success=False,
+        #     details=str(e)
+        # )
         return False
 
 def pusblishTable(master_df):
+    logger.info("Starting table publishing process")
+    try:
+        credentials = get_secret(os.environ.get("SECRET_NAME"))
+        logger.info("Credentials retrieved successfully.")
+        db_params = get_db_connection_params()
+        conn = psycopg2.connect(
+            host=db_params['ENDPOINT'],
+            port=db_params['PORT'],
+            database=db_params['DBNAME'],
+            user=credentials['username'],
+            password=credentials['password'],
+            sslmode='require'
+        )
+        cur = conn.cursor()
 
-    credentials = get_secret(os.environ.get("SECRET_NAME"))
-    logger.info("Credentials retrieved successfully.")
-    db_params = get_db_connection_params()
-    conn = psycopg2.connect(
-        host=db_params['ENDPOINT'],
-        port=db_params['PORT'],
-        database=db_params['DBNAME'],
-        user=credentials['username'],
-        password=credentials['password'],
-        sslmode='require'
-    )
-    cur = conn.cursor()
+        if not dropTableIFExist(cur):
+            logger.error("Failed to drop the table. Aborting publish.")
+            cur.close()
+            conn.close()
+            return
+        if not createTable(cur,master_df,conn):
+            logger.error("Failed to create the table. Aborting publish.")
+            cur.close()
+            conn.close()
+            return
+        if not loadData(cur, master_df, conn):
+            logger.error("Failed to load data to the table. Aborting publish.")
+            cur.close()
+            conn.close()
+            return
 
-    if not dropTableIFExist(cur):
-        logger.error("Failed to drop the table. Aborting publish.")
         cur.close()
-        conn.close()
-    if not createTable(cur,master_df,conn):
-        logger.error("Failed to create the table. Aborting publish.")
-        cur.close()
-        conn.close()
-    if not loadData(cur, master_df, conn):
-        logger.error("Failed to load data to the table. Aborting publish.")
-        cur.close()
-        conn.close()
+        conn.commit()
+        logger.info("Successfully published table")
+    except Exception as e:
+        logger.error(f"Error in publishTable: {str(e)}")
+        raise
 
-    cur.close()
-    conn.commit()
-
+def get_lambda_ip():
+    logger.info("Getting Lambda container IP address")
+    try:
+        hostname = socket.gethostname()
+        private_ip = socket.gethostbyname(hostname)
+        logger.info(f"Successfully retrieved IP address: {private_ip}")
+        return private_ip
+    except Exception as e:
+        logger.error(f"Error getting IP address: {str(e)}")
+        return f"Error getting IP address: {str(e)}"
 
 def lambda_handler(event, context):
-
+    logger.info("Starting lambda handler execution")
     try:
         check_environment()
+        check_connection()
         event_detail = event['detail']
+        logger.info(f"Processing event detail: {event_detail}")
 
         df_a, df_b = get_dataframes(event_detail)
 
         if df_a is None or df_b is None:
+            logger.error("Failed to create one or both DataFrames")
             raise ValueError("Failed to create one or both DataFrames")
 
-        df =create_table_master(df_a, df_b)
+        df = create_table_master(df_a, df_b)
         pusblishTable(df)
+
+        logger.info("Lambda execution completed successfully")
         return {
             'statusCode': 200,
             'body': json.dumps({
@@ -495,5 +431,4 @@ def lambda_handler(event, context):
                 'error': str(e)
             })
         }
-
 
