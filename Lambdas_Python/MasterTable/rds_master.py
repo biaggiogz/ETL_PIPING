@@ -18,6 +18,7 @@ from psycopg2 import sql
 from botocore.exceptions import ClientError
 import datetime
 import functools
+import html
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -144,6 +145,32 @@ def get_secret(secret_name):
     except ClientError as e:
         logger.error(f"Failed to retrieve secret: {e}")
         raise
+def send_sns_notification(success, details):
+    try:
+        sns_client = boto3.client('sns')
+        success_topic_arn = SUCCESS_SNS_TOPIC_ARN
+        error_topic_arn = FAILURE_SNS_TOPIC_ARN
+
+        if success:
+            topic_arn = success_topic_arn
+            message = f"Data loading completed successfully. Details: {details}"
+            subject = "Data Loading Success"
+        else:
+            topic_arn = error_topic_arn
+            message = f"Data loading failed. Details: {details}"
+            subject = "Data Loading Failure"
+
+        response = sns_client.publish(
+            TopicArn=topic_arn,
+            Message=message,
+            Subject=subject
+        )
+        logger.info(f"SNS notification sent successfully: {response['MessageId']}")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to send SNS notification: {str(e)}")
+        return False
+
 
 def create_dataframe_from_event(conn, event_detail: Dict) -> pd.DataFrame:
     schema_name = event_detail['schema_name']
@@ -332,19 +359,19 @@ def loadData(cur, df_format, conn):
         cur.copy_expert(copy_sql, buffer)
         conn.commit()
         logger.info(f"Successfully loaded {len(df_format)} records into {full_table}")
-        # send_sns_notification(
-        #     success=True,
-        #     details=f"Successfully loaded {len(df_format)} records into {full_table}"
-        # )
+        send_sns_notification(
+            success=True,
+            details=f"Successfully loaded {len(df_format)} records into {full_table}"
+        )
         return True
     except Exception as e:
         logger.error(f"Error loading data support to table user_01.source_{NAME_TABLE}: {str(e)}")
         if not conn.closed:
             conn.rollback()
-        # send_sns_notification(
-        #     success=False,
-        #     details=str(e)
-        # )
+        send_sns_notification(
+            success=False,
+            details=str(e)
+        )
         return False
 
 def pusblishTable(master_df):
@@ -397,12 +424,21 @@ def get_lambda_ip():
         logger.error(f"Error getting IP address: {str(e)}")
         return f"Error getting IP address: {str(e)}"
 
+
 def lambda_handler(event, context):
     logger.info("Starting lambda handler execution")
+    logger.info(f"Received event: {json.dumps(event)}")
     try:
         check_environment()
         check_connection()
-        event_detail = event['detail']
+
+        logger.info(f"Raw event: {json.dumps(event)}")
+
+        sqs_record = event['Records'][0]
+
+        message_body = json.loads(sqs_record['body'])
+        event_detail = message_body['detail']
+
         logger.info(f"Processing event detail: {event_detail}")
 
         df_a, df_b = get_dataframes(event_detail)
@@ -431,4 +467,3 @@ def lambda_handler(event, context):
                 'error': str(e)
             })
         }
-

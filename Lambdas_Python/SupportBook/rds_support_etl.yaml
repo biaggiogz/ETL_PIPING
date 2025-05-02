@@ -65,7 +65,8 @@ Resources:
               - 'sts:AssumeRole'
       ManagedPolicyArns:
         - 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
-        - 'arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole'
+#        - 'arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole'
+        - 'arn:aws:iam::aws:policy/service-role/AWSLambdaSQSQueueExecutionRole'
       Policies:
         - PolicyName: 'ECRAccess'
           PolicyDocument:
@@ -131,10 +132,17 @@ Resources:
                 Action:
                   - 'sns:Publish'
                 Resource:
-                  - !Sub 'arn:aws:sns:${AWS::Region}:${AWS::AccountId}:SuccessFullWeldingBook'
+                  - !Sub 'arn:aws:sns:${AWS::Region}:${AWS::AccountId}:SuccessFullSupportBook'
                   - !Sub 'arn:aws:sns:${AWS::Region}:${AWS::AccountId}:FailureSupportBook'
-
-
+        - PolicyName: 'SQSAccess'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: 'Allow'
+                Action:
+                  - 'sqs:SendMessage'
+                  - 'sqs:GetQueueAttributes'
+                Resource: !GetAtt MyQueue.Arn
   LambdaFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -191,9 +199,17 @@ Outputs:
   LambdaFunctionArn:
     Description: Lambda Function ARN
     Value: !GetAtt LambdaFunction.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-LambdaFunctionArn"
+
   QueueURL:
     Description: URL of the created SQS queue
     Value: !Ref MyQueue
+    Export:
+      Name: "QueueURL-Support"
+
   QueueARN:
     Description: ARN of the created SQS queue
     Value: !GetAtt MyQueue.Arn
+    Export:
+      Name: "QueueURL-Support-ARN"

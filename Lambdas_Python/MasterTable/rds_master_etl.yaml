@@ -2,11 +2,11 @@ AWSTemplateFormatVersion: '2010-09-09'
 Transform: 'AWS::Serverless-2016-10-31'
 Metadata:
   'AWS::ServerlessRepo::Application':
-    Name: rds-wb-etl
+    Name: rds-excel-support
     Labels:
       - piping
       - lambda
-      - rds-wb-etl
+      - rds-master-etl
     SemanticVersion: 1.2.0
 Parameters:
   ImageUri:
@@ -42,11 +42,7 @@ Parameters:
     Type: String
   FailureSNSTopic:
     Type: String
-  SourceName:
-    Type: String
   SchemaName:
-    Type: String
-  ColumnsToMaster:
     Type: String
 Resources:
 
@@ -87,16 +83,16 @@ Resources:
                     - Region: !Select [3, !Split [".", !Ref ImageUri ]]
                       Account: !Select [0, !Split [".", !Ref ImageUri ]]
                       RepositoryName: !Select [1, !Split ["/", !Select [ 0, !Split [":", !Select [5, !Split [".", !Ref ImageUri ]]]]]]
-        - PolicyName: 'S3Access'
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: 'Allow'
-                Action:
-                  - 's3:*'
-                Resource:
-                  - !Sub 'arn:aws:s3:::${BucketName}/weldingbook/destination/*'
-                  - !Sub 'arn:aws:s3:::${BucketName}/weldingbook/processed/*'
+#        - PolicyName: 'S3Access'
+#          PolicyDocument:
+#            Version: '2012-10-17'
+#            Statement:
+#              - Effect: 'Allow'
+#                Action:
+#                  - 's3:*'
+#                Resource:
+#                  - !Sub 'arn:aws:s3:::${BucketName}/support/destination/*'
+#                  - !Sub 'arn:aws:s3:::${BucketName}/support/processed/*'
         - PolicyName: 'RDSAccess'
           PolicyDocument:
             Version: '2012-10-17'
@@ -132,17 +128,21 @@ Resources:
                 Action:
                   - 'sns:Publish'
                 Resource:
-                  - !Sub 'arn:aws:sns:${AWS::Region}:${AWS::AccountId}:SuccessFullWeldingBook'
-                  - !Sub 'arn:aws:sns:${AWS::Region}:${AWS::AccountId}:FailureWeldingBook'
-        - PolicyName: 'SQSAccess'
+                  - !Sub 'arn:aws:sns:${AWS::Region}:${AWS::AccountId}:SuccessFullMasterTable'
+                  - !Sub 'arn:aws:sns:${AWS::Region}:${AWS::AccountId}:FailureFullMasterTable'
+        - PolicyName: SQSReceiveAccess
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
-              - Effect: 'Allow'
+              - Effect: Allow
                 Action:
-                  - 'sqs:SendMessage'
+                  - 'sqs:ReceiveMessage'
+                  - 'sqs:DeleteMessage'
                   - 'sqs:GetQueueAttributes'
-                Resource: !GetAtt MyQueue.Arn
+                  - 'sqs:ChangeMessageVisibility'
+                Resource:
+                  - !ImportValue QueueURL-Support-ARN
+                  - !ImportValue QueueURL-WB-ARN
 
   LambdaFunction:
     Type: AWS::Serverless::Function
@@ -167,50 +167,23 @@ Resources:
           NAME_TABLE: !Ref NameTable
           SUCCESS_SNS_TOPIC_ARN: !Ref SuccessSNSTopic
           FAILURE_SNS_TOPIC_ARN: !Ref FailureSNSTopic
-          SQS_QUEUE_URL : !Ref MyQueue
-          SOURCE_NAME: !Ref SourceName
           SCHEMA_NAME: !Ref SchemaName
-          COLUMNS_TO_MASTER: !Ref ColumnsToMaster
 
-  MyQueue:
-    Type: AWS::SQS::Queue
-    Properties:
-      QueueName: !Sub 'queue-${AWS::StackName}'
-      VisibilityTimeout: 30
-      MessageRetentionPeriod: 7200
-      SqsManagedSseEnabled: true
-
-  QueuePolicy:
-    Type: AWS::SQS::QueuePolicy
-    Properties:
-      Queues:
-        - !Ref MyQueue
-      PolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              AWS: !GetAtt LambdaExecutionRole.Arn
-            Action:
-              - sqs:SendMessage
-              - sqs:GetQueueAttributes
-            Resource: !GetAtt MyQueue.Arn
+      Events:
+        QueueSupportEvent:
+          Type: SQS
+          Properties:
+            Queue: !ImportValue QueueURL-Support-ARN
+            BatchSize: 10
+            Enabled: true
+        QueueWBEvent:
+          Type: SQS
+          Properties:
+            Queue: !ImportValue QueueURL-WB-ARN
+            BatchSize: 10
+            Enabled: true
 
 Outputs:
   LambdaFunctionArn:
     Description: Lambda Function ARN
     Value: !GetAtt LambdaFunction.Arn
-    Export:
-      Name: !Sub "${AWS::StackName}-LambdaFunctionArn"
-
-  QueueURL:
-    Description: URL of the created SQS queue
-    Value: !Ref MyQueue
-    Export:
-      Name: "QueueURL-WB"
-
-  QueueARN:
-    Description: ARN of the created SQS queue
-    Value: !GetAtt MyQueue.Arn
-    Export:
-      Name: "QueueURL-WB-ARN"

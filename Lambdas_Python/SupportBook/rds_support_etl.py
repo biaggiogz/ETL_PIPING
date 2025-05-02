@@ -52,7 +52,7 @@ def setup_logger(name: str = None) -> logging.Logger:
 logger = setup_logger(__name__)
 
 def check_environment():
-    required_vars = ['ENDPOINT', 'PORT', 'REGION', 'SECRET_NAME', 'DBNAME']
+    required_vars = ['ENDPOINT', 'PORT', 'REGION', 'SECRET_NAME', 'DBNAME', 'SQS_QUEUE_URL']
     missing_vars = [var for var in required_vars if not os.getenv(var)]
     if missing_vars:
         logger.error(f"Missing environment variables: {missing_vars}")
@@ -172,6 +172,8 @@ def format_dataframe_columns(df: pd.DataFrame, threshold: float = 0.95) -> pd.Da
                     'yes': True, 'no': False
                 })
             else:
+                formatted_df[column] = formatted_df[column].replace(['', 'N/A', 'na', 'null'], pd.NA)
+
                 formatted_df[column] = formatted_df[column].astype(pandas_dtype)
 
 
@@ -349,6 +351,7 @@ def loadData(cur, df_format, conn):
             success=True,
             details=f"Successfully loaded {len(df_format)} records into {full_table}"
         )
+        logger.info(f"Sending message to SQS queue: {SQS_QUEUE_URL}")
         send_sqs_message(
             source_name= SOURCE_NAME,
             schema_name= SCHEMA_NAME,
@@ -459,7 +462,7 @@ def lambda_handler(event, context):
         s3_client.download_file(bucket, key, input_path)
 
         logger.info(f"Strating read csv")
-        df = pd.read_csv(input_path, header=0, sep=',')
+        df = pd.read_csv(input_path, header=0, sep=',',usecols=range(43))
         logger.info(f"Checking connection DB")
         if not check_connection():
             return {
