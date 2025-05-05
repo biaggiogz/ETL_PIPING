@@ -35,7 +35,10 @@ SUCCESS_SNS_TOPIC_ARN =os.getenv('SUCCESS_SNS_TOPIC_ARN')
 FAILURE_SNS_TOPIC_ARN=os.getenv('FAILURE_SNS_TOPIC_ARN')
 SCHEMA_NAME=os.getenv('SCHEMA_NAME')
 NAME_TABLE=os.getenv('NAME_TABLE')
-
+WB_COLUMNS=os.environ['WB_COLUMNS']
+ESTANDAR_COLUMNS=os.environ['ESTANDAR_COLUMNS']
+DAP_COLUMNS=os.environ['DAP_COLUMNS']  #data pressure columns
+ESPECIALES_COLUMNS=os.environ['ESPECIALES_COLUMNS']
 
 def setup_logger(name: str = None) -> logging.Logger:
     logger = logging.getLogger(name)
@@ -55,7 +58,7 @@ _db_params_cache={}
 
 def check_environment():
     logger.info("Checking environment variables...")
-    required_vars = ['ENDPOINT', 'PORT', 'REGION', 'SECRET_NAME', 'SUCCESS_SNS_TOPIC_ARN','FAILURE_SNS_TOPIC_ARN','DBNAME', 'SCHEMA_NAME','NAME_TABLE']
+    required_vars = ['ENDPOINT', 'PORT', 'REGION', 'SECRET_NAME', 'SUCCESS_SNS_TOPIC_ARN','FAILURE_SNS_TOPIC_ARN','DBNAME', 'SCHEMA_NAME','NAME_TABLE','WB_COLUMNS']
     missing_vars = [var for var in required_vars if not os.getenv(var)]
     if missing_vars:
         logger.error(f"Missing environment variables: {missing_vars}")
@@ -212,8 +215,10 @@ def get_predefined_query_df(query_type: str) -> pd.DataFrame:
         )
 
         queries = {
-            'SUPPORT': f"SELECT record, e3did, supportid, montaje FROM {SCHEMA_NAME}.source_support",
-            'WB': f"SELECT record, e3did, total, date_execut FROM {SCHEMA_NAME}.source_wb"
+            'ESTANDAR': f"SELECT {ESTANDAR_COLUMNS} FROM {SCHEMA_NAME}.source_support",
+            'ESPECIALES': f"SELECT {ESPECIALES_COLUMNS} FROM {SCHEMA_NAME}.source_sps",
+            'WB': f"SELECT {WB_COLUMNS} FROM {SCHEMA_NAME}.source_wb",
+            'DAPRESSURE':  f"SELECT {DAP_COLUMNS} FROM {SCHEMA_NAME}.source_dapressure"
         }
 
         logger.info(f"Executing {query_type} query")
@@ -229,60 +234,107 @@ def get_predefined_query_df(query_type: str) -> pd.DataFrame:
             conn.close()
         raise
 
-def get_dataframes(event_detail: Dict) -> Tuple[Optional[pd.DataFrame], Optional[pd.DataFrame]]:
+def get_dataframes(event_detail: Dict) -> Tuple[Optional[pd.DataFrame], Optional[pd.DataFrame], Optional[pd.DataFrame], Optional[pd.DataFrame]]:
     logger.info("Starting get_dataframes process")
     source_name = event_detail['source_name']
-    df_a = df_b = None
+    df_a = df_b = df_c = df_d = None
     pool = get_connection_pool()
     conn = pool.getconn()
+
     try:
+        logger.info(f"Processing trigger from source: {source_name}")
+        main_df = create_dataframe_from_event(conn, event_detail)
+
         if source_name == 'WB':
-            logger.info("Processing lambda WB trigger")
-            df_a = create_dataframe_from_event(conn,event_detail)
-            df_b = get_predefined_query_df('SUPPORT')
-
-        elif source_name == 'SUPPORT':
-            logger.info("Processing lambda Support trigger")
-            df_b = create_dataframe_from_event(conn,event_detail)
+            df_a = main_df
+            df_b = get_predefined_query_df('ESTANDAR')
+            df_c = get_predefined_query_df('ESPECIALES')
+        elif source_name == 'ESTANDAR':
+            df_b = main_df
             df_a = get_predefined_query_df('WB')
-
+            df_c = get_predefined_query_df('ESPECIALES')
+        elif source_name == 'ESPECIALES':
+            df_c = main_df
+            df_a = get_predefined_query_df('WB')
+            df_b = get_predefined_query_df('ESTANDAR')
         else:
             logger.error(f"Unknown source: {source_name}")
             raise ValueError(f"Unknown source: {source_name}")
 
-        logger.info("Successfully retrieved both DataFrames")
-        return df_a, df_b
+        df_d = get_predefined_query_df('DAPRESSURE')
+
+        logger.info(f"Successfully retrieved DataFrames for source: {source_name}")
+        return df_a, df_b, df_c, df_d
 
     except Exception as e:
-        logger.error(f"Error in get_dataframes: {str(e)}")
+        logger.exception(f"Error in get_dataframes for source: {source_name}")
         raise
+    finally:
+        pool.putconn(conn)
 
-def create_table_master(df_a: pd.DataFrame, df_b: pd.DataFrame) -> pd.DataFrame:
+# def create_table_master(df_a: pd.DataFrame, df_b: pd.DataFramem ,df_c: pd.DataFrame, df_d: pd.DataFrame) -> pd.DataFrame:
+#     logger.info("Creating master table from DataFrames")
+#
+#     tables = [df_a,df_b,df_c]
+#
+#     try:
+#         count_a = df_a.groupby('e3did')['record'].count().reset_index(name='count_a')
+#         count_b = df_b.groupby('e3did')['record'].count().reset_index(name='count_b')
+#         max_counts = pd.merge(count_a, count_b, on='e3did', how='outer').fillna(0)
+#         max_counts['max_count'] = max_counts[['count_a', 'count_b']].max(axis=1)
+#
+#         expanded = []
+#         for _, row in max_counts.iterrows():
+#             expanded.extend([(row['e3did'], i+1) for i in range(int(row['max_count']))])
+#
+#         expanded_df = pd.DataFrame(expanded, columns=['e3did', 'record'])
+#
+#         result = (
+#             expanded_df
+#             .merge(df_a, on=['e3did', 'record'], how='left')
+#             .merge(df_b, on=['e3did', 'record'], how='left')
+#         )
+#         master_df = result.sort_values(['e3did', 'record']).reset_index(drop=True)
+#
+#         logger.info(f"Successfully created master table with {len(master_df)} rows")
+#         return master_df
+#     except Exception as e:
+#         logger.error(f"Error creating master table: {str(e)}")
+#         raise
+
+def create_table_master(df_a: pd.DataFrame, df_b: pd.DataFrame ,df_c: pd.DataFrame, df_d: pd.DataFrame) -> pd.DataFrame:
     logger.info("Creating master table from DataFrames")
+
+    tables = [df_a,df_b,df_c]
     try:
-        count_a = df_a.groupby('e3did')['record'].count().reset_index(name='count_a')
-        count_b = df_b.groupby('e3did')['record'].count().reset_index(name='count_b')
-        max_counts = pd.merge(count_a, count_b, on='e3did', how='outer').fillna(0)
-        max_counts['max_count'] = max_counts[['count_a', 'count_b']].max(axis=1)
+
+        counts = [df.groupby('e3did')['record'].count().reset_index(name=f'count_{i}')
+                  for i, df in enumerate(tables)]
+
+        max_counts = reduce(lambda left, right: pd.merge(left, right, on='e3did', how='outer'), counts).fillna(0)
+
+        max_counts['max_count'] = max_counts[[col for col in max_counts.columns if col.startswith('count_')]].max(axis=1)
 
         expanded = []
         for _, row in max_counts.iterrows():
             expanded.extend([(row['e3did'], i+1) for i in range(int(row['max_count']))])
-
         expanded_df = pd.DataFrame(expanded, columns=['e3did', 'record'])
 
-        result = (
-            expanded_df
-            .merge(df_a, on=['e3did', 'record'], how='left')
-            .merge(df_b, on=['e3did', 'record'], how='left')
-        )
-        master_df = result.sort_values(['e3did', 'record']).reset_index(drop=True)
+        result = expanded_df
+        for df in tables:
+            result = result.merge(df, on=['e3did', 'record'], how='left')
 
-        logger.info(f"Successfully created master table with {len(master_df)} rows")
-        return master_df
+        pre_result = result.sort_values(['e3did', 'record']).reset_index(drop=True)
+
+        final_result = pre_result.merge(df_d, on=['e3did'], how='left')
+
+
+        return final_result
     except Exception as e:
         logger.error(f"Error creating master table: {str(e)}")
         raise
+
+
 
 def dropTableIFExist(cur):
     try:
@@ -441,7 +493,7 @@ def lambda_handler(event, context):
 
         logger.info(f"Processing event detail: {event_detail}")
 
-        df_a, df_b = get_dataframes(event_detail)
+        df_a, df_b , df_c, df_d = get_dataframes(event_detail)
 
         if df_a is None or df_b is None:
             logger.error("Failed to create one or both DataFrames")

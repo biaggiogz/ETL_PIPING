@@ -7,15 +7,17 @@ import sys
 import psycopg2
 import logging
 import time
-from typing import Optional , Dict, Any, List , Type,Union
+from typing import Optional , Dict, Any, List , Type,Union, Tuple
 import warnings
 import unicodedata
 import pandas as pd
 import numpy as np
 import socket
+import awswrangler as wr
+from functools import lru_cache
 from psycopg2 import sql
 from botocore.exceptions import ClientError
-
+from datetime import datetime
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -37,6 +39,8 @@ SCHEMA_NAME=os.getenv('SCHEMA_NAME')
 COLUMNS_TO_MASTER_STR=os.getenv('COLUMNS_TO_MASTER')
 COLUMNS_TO_MASTER=COLUMNS_TO_MASTER_STR.split(',')  if COLUMNS_TO_MASTER_STR else []
 
+
+
 def setup_logger(name: str = None) -> logging.Logger:
     logger = logging.getLogger(name)
     if not logger.handlers:
@@ -51,7 +55,7 @@ def setup_logger(name: str = None) -> logging.Logger:
 logger = setup_logger(__name__)
 
 def check_environment():
-    required_vars = ['ENDPOINT', 'PORT', 'REGION', 'SECRET_NAME', 'DBNAME']
+    required_vars = ['ENDPOINT', 'PORT', 'REGION', 'SECRET_NAME', 'DBNAME', 'SQS_QUEUE_URL']
     missing_vars = [var for var in required_vars if not os.getenv(var)]
     if missing_vars:
         logger.error(f"Missing environment variables: {missing_vars}")
@@ -171,6 +175,8 @@ def format_dataframe_columns(df: pd.DataFrame, threshold: float = 0.95) -> pd.Da
                     'yes': True, 'no': False
                 })
             else:
+                formatted_df[column] = formatted_df[column].replace(['', 'N/A', 'na', 'null'], pd.NA)
+
                 formatted_df[column] = formatted_df[column].astype(pandas_dtype)
 
 
@@ -207,19 +213,232 @@ def format_value(val):
         return str(int(val))  # Convert float to int before string conversion
     return str(val)
 
+def clean_supportid(val):
+    if pd.isnull(val):
+        return None
+    if val.startswith("/SPS-"):
+        return val
+    return val.split("_")[0]
+
+def assign_provider(val):
+    if pd.isnull(val):
+        return None
+    elif val != 'TEIGA-TMI':
+        return 'TECHNIP'
+    else:
+        return val
+
 def transformationsETL(df):
+    # df['rw'] = df.groupby(['E3DID', 'SUPPORTID', 'SUPPORTMARKALL']).cumcount() + 1
+
+    df = df[df['e3did'].notna()]
+
+    df = df.rename(columns={'nmrev': 'nmrevold'})
+    df['nmrev'] = df['nmrevold'].apply(assign_provider)
+    df['supportid'] = df['supportid'].apply(clean_supportid)
+
+    select_columns = [
+        'nmrev','e3did', 'supportid', 'estadodefabricacionnuevoformato',
+        'fecha', 'fecha2', 'montaje'
+    ]
+
+    df_light = df[select_columns].copy()
+    group_keys = ['e3did', 'supportid']
 
 
-    df = df[df['id_line'].notna()]
-    df = df.copy()
-    df['spool'] = df['spool'].replace('-', np.nan)
+    df_light['is_installed'] = (df_light['fecha2'].notna()) & (df_light['montaje'] == 1)
 
-    df['e3did'] = '/' + df[['area', 'dn', 'line_fluid', 'id_line', 'specification', 'ins_trac_tren']].applymap(format_value).agg('-'.join, axis=1)
-    df['record'] = df.groupby(['e3did']).cumcount() + 1
-    df['line_id'] = df['line_fluid'] + df['id_line']
+    installed_flags = df_light.groupby(group_keys)['is_installed'].transform('all')
+
+    df_light['installed'] = installed_flags.map({True: 'installed', False: 'not installed'})
+
+    df_light['is_recieved'] = (df_light['fecha'].notna()) & (df_light['estadodefabricacionnuevoformato'] == 'ENTREGA')
+    recieved_flags = df_light.groupby(group_keys)['is_recieved'].transform('all')
+    df_light['recieved'] = recieved_flags.map({True: 'recieved', False: 'not recieved'})
+    df_light['record'] = df_light.groupby(['e3did']).cumcount() + 1
 
 
-    return df
+# def create_hash(row):
+    #     concat_string = f"{row['E3DID']}||{row['SUPPORTID']}||{row['SUPPORTMARKALL']}"
+    #     return hashlib.sha256(concat_string.encode()).hexdigest()
+    #
+    # df['ID_DB'] = df.apply(create_hash, axis=1)
+    return df_light
+
+def get_aws_clients() -> Tuple[boto3.client, boto3.resource]:
+    session = boto3.Session()
+    return (
+        session.client('glue', config=boto3.Config(retries={'max_attempts': 3})),
+        session.resource('s3')
+    )
+
+
+@lru_cache(maxsize=1)
+def get_config_iceberg(bucket_name: str) -> Dict[str, str]:
+    return {
+        'glue_database': 'piping_db_glue',
+        'staging_table': 'iceberg_support_staging',
+        'target_table': 'iceberg_support',
+        'path': f"s3://{bucket_name}/support/iceberg_catalog/staging/",
+        'temp_path': f"s3://{bucket_name}/support/iceberg_catalog/temp/",
+        'workgroup': 'piping_analytics'
+    }
+
+def generate_merge_sql_from_df(
+        df: pd.DataFrame,
+        glue_database: str,
+        target_table: str,
+        staging_table: str,
+        match_keys: list
+) -> str:
+    all_columns = df.columns.tolist()
+    join_conditions = " AND ".join(
+        [f"target.{col} = source.{col}" for col in match_keys]
+    )
+    update_clause = ",\n        ".join(
+        [f"{col} = source.{col}" for col in all_columns]
+    )
+    insert_columns = ", ".join(all_columns)
+    insert_values = ", ".join([f"source.{col}" for col in all_columns])
+    merge_sql = f"""
+    MERGE INTO {glue_database}.{target_table} target
+    USING {glue_database}.{staging_table} source
+    ON {join_conditions}
+    WHEN MATCHED THEN
+        UPDATE SET
+        {update_clause}
+    WHEN NOT MATCHED THEN
+        INSERT ({insert_columns})
+        VALUES ({insert_values})
+    """
+    return merge_sql.strip()
+
+def drop_staging_table(database, table):
+    glue, _ = get_aws_clients()
+    try:
+        glue.delete_table(DatabaseName=database, Name=table)
+        logger.info(f"Staging table '{database}.{table}' deleted successfully.")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to delete staging table: {e}")
+        return False
+
+def clean_s3_prefix(bucket_name: str, prefix: str):
+    _, s3 = get_aws_clients()
+
+    try:
+        bucket = s3.Bucket(bucket_name)
+        object_count = 0
+        for obj_version in bucket.object_versions.filter(Prefix=prefix):
+            obj_version.delete()
+            object_count += 1
+
+        logger.info(f"Cleaned {object_count} objects from s3://{bucket_name}/{prefix}")
+        return True
+    except Exception as e:
+        logger.error(f"Error cleaning S3 prefix: {e}")
+        return False
+
+def catalog_iceberg(df: pd.DataFrame) -> bool:
+    if df.empty:
+        logger.info("Warning: Empty DataFrame provided")
+        return False
+
+    df_copy = df.copy()
+    df_copy['cdc_timestamp'] = pd.Timestamp.now()
+
+    glue_database = "piping_db_glue"
+    target_table = "iceberg_support"
+    staging_table = "iceberg_support_staging"
+    bucket_name = "control-piping-2025"
+    path = f"s3://{bucket_name}/support/iceberg_catalog/staging"
+    temp_path = f"s3://{bucket_name}/support/iceberg_catalog/temp"
+    workgroup_athena = "piping_analytics"
+
+    try:
+        # Step 1: Write to staging table
+        wr.athena.to_iceberg(
+            df=df_copy,
+            database=glue_database,
+            table=staging_table,
+            table_location=path,
+            temp_path=temp_path,
+            mode='overwrite',
+            workgroup=workgroup_athena,
+            schema_evolution=True
+        )
+        logger.info("Staging table written successfully.")
+
+        # # Step 2: Generate and execute MERGE query
+        # merge_sql = f"""
+        # MERGE INTO {glue_database}.{target_table} target
+        # USING {glue_database}.{staging_table} source
+        # ON target.e3did = source.e3did
+        # AND target.supportid = source.supportid
+        # AND target.nmrev = source.nmrev
+        # WHEN MATCHED THEN
+        #     UPDATE SET
+        #         estadodefabricacionnuevoformato = source.estadodefabricacionnuevoformato,
+        #         fecha = source.fecha,
+        #         fecha2 = source.fecha2,
+        #         montaje = source.montaje,
+        #         is_installed = source.is_installed,
+        #         installed = source.installed,
+        #         is_recieved = source.is_recieved,
+        #         recieved = source.recieved,
+        #         cdc_timestamp = source.cdc_timestamp
+        # WHEN NOT MATCHED THEN
+        #     INSERT (
+        #         nmrev,
+        #         e3did,
+        #         supportid,
+        #         estadodefabricacionnuevoformato,
+        #         fecha,
+        #         fecha2,
+        #         montaje,
+        #         is_installed,
+        #         installed,
+        #         is_recieved,
+        #         recieved,
+        #         cdc_timestamp
+        #     )
+        #     VALUES (
+        #         source.nmrev,
+        #         source.e3did,
+        #         source.supportid,
+        #         source.estadodefabricacionnuevoformato,
+        #         source.fecha,
+        #         source.fecha2,
+        #         source.montaje,
+        #         source.is_installed,
+        #         source.installed,
+        #         source.is_recieved,
+        #         source.recieved,
+        #         source.cdc_timestamp
+        #     )
+        # """
+        #
+        # query_exec = wr.athena.start_query_execution(
+        #     sql=merge_sql,
+        #     database=glue_database,
+        #     workgroup=workgroup_athena
+        # )
+        # response = wr.athena.wait_query(query_execution_id=query_exec)
+        #
+        # if response['Status']['State'] != 'SUCCEEDED':
+        #     raise Exception(f"Merge query failed: {response['Status']['StateChangeReason']}")
+        # logger.info("Merge query executed successfully.")
+        #
+        # # Step 3: Cleanup
+        # drop_staging_table(glue_database, staging_table)
+        # clean_s3_prefix(bucket_name, 'support/iceberg_catalog/staging/')
+        # logger.info("Staging cleanup completed.")
+
+        return True
+
+    except Exception as e:
+        logger.error(f"Error in catalog_iceberg: {str(e)}")
+        return False
 
 def dropTableIFExist(cur):
     try:
@@ -348,6 +567,7 @@ def loadData(cur, df_format, conn):
             success=True,
             details=f"Successfully loaded {len(df_format)} records into {full_table}"
         )
+        logger.info(f"Sending message to SQS queue: {SQS_QUEUE_URL}")
         send_sqs_message(
             source_name= SOURCE_NAME,
             schema_name= SCHEMA_NAME,
@@ -458,7 +678,7 @@ def lambda_handler(event, context):
         s3_client.download_file(bucket, key, input_path)
 
         logger.info(f"Strating read csv")
-        df = pd.read_csv(input_path, header=0, sep=',')
+        df = pd.read_csv(input_path, header=0, sep=',',usecols=range(43))
         logger.info(f"Checking connection DB")
         if not check_connection():
             return {
@@ -471,6 +691,7 @@ def lambda_handler(event, context):
         logger.info(f"Transformations ETL")
         df_format = transformationsETL(df_format)
         pusblishTable(df_format)
+        # catalog_iceberg(df_format)
         os.remove(input_path)
 
 
@@ -485,3 +706,4 @@ def lambda_handler(event, context):
             'statusCode': 500,
             'body': json.dumps(f'Error: {str(e)}')
         }
+

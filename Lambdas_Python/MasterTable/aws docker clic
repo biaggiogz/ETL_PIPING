@@ -1,0 +1,7 @@
+aws ecr get-login-password | docker login --username AWS --password-stdin %AWS_ACCOUNT%.dkr.ecr.%AWS_REGION%.amazonaws.com
+docker tag lambda-rds-master-x86_64:06 %AWS_ACCOUNT%.dkr.ecr.%AWS_REGION%.amazonaws.com/lambda-rds:v06-lambda-rds-master-x86_64
+docker push %AWS_ACCOUNT%.dkr.ecr.%AWS_REGION%.amazonaws.com/lambda-rds:v06-lambda-rds-master-x86_64
+
+docker build -f DockerfileLambda_MasterTable -t "lambda-rds-master-x86_64:06" --provenance=false ./
+
+curl -X POST "http://localhost:9000/2015-03-31/functions/function/invocations" -H "Content-Type: application/json" --data-binary @event.json

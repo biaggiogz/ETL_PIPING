@@ -17,7 +17,7 @@
         <Logger name="software.amazon.awssdk" level="WARN"/>
 
         <!-- Your application specific logger -->
-        <Logger name="logicExcel.AppSheetEstandar" level="INFO" additivity="false">
+        <Logger name="logicExcel.App" level="INFO" additivity="false">
             <AppenderRef ref="Lambda"/>
         </Logger>
     </Loggers>

@@ -64,11 +64,13 @@ public class AppTest {
         // Set up environment variables for testing
         System.setProperty("EXPECTED_ACCOUNT_ID","881490115226");
         System.setProperty("BUCKET_NAME", "control-piping-2025");
-        System.setProperty("SHEET_NAME", "Estandar");
-        System.setProperty("FOLDER_SOURCE_PATH", "support/source/");
-        System.setProperty("FOLDER_DESTINATION_PATH", "support/destination/");
-        System.setProperty("COLUMNS_TO_TRIM","NM REV,E3DID,SUPPORTID,ESTADO DE FABRICACION NUEVO FORMATO,FECHA,MONTAJE,FECHA2,TESTPACKASOCIADO");
+        System.setProperty("SHEET_NAME", "ISOS");
+        System.setProperty("FOLDER_SOURCE_PATH", "wb_tp_precom_master/source/");
+        System.setProperty("FOLDER_DESTINATION_PATH", "wb_tp_precom_master/destination/sheet/isos/");
+        System.setProperty("COLUMNS_TO_INSIDE_TRIM","DESIGN AREA,ISOMETRICOS IFC3,TP/VT,CAT,TP CAT,TP UNIT,SUBSYSTEM");
+        System.setProperty("SKIP_ROW","1");
     }
+
 
 
 

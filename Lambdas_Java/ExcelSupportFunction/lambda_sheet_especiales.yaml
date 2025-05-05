@@ -1,15 +1,14 @@
-AWSTemplateFormatVersion: '2010-09-09'
+﻿AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: Excel file processor Lambda function
-
 Globals:
   Function:
     LoggingConfig:
       LogFormat: JSON
     Tags:
       Application: ExcelProcessor
-      Environment: !Ref AWS::StackName
-
+      Environment:
+        Ref: AWS::StackName
 Parameters:
   BucketName:
     Type: String
@@ -36,23 +35,23 @@ Parameters:
     Type: String
     Default: lambda-excel-support-x86-64
 Resources:
-
-
   LambdaLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: !Sub /aws/lambda/${ExcelSupportFunction}
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${SheetSpecialesFunction}
       RetentionInDays: 5
     UpdateReplacePolicy: Delete
     DeletionPolicy: Delete
-
-
-  ExcelSupportFunction:
+    Metadata:
+      SamResourceId: LambdaLogGroup
+  SheetSpecialesFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Ref FunctionName
-      CodeUri: .
-      Handler: logicExcel.App::handleRequest
+      FunctionName:
+        Ref: FunctionName
+      CodeUri: s3://aws-sam-cli-managed-default-samclisourcebucket-sv6fjput5i5q/lambda-java-sheet-especiales-x86-64/2fbf2f08e2b3de9ec9145471eb465651
+      Handler: logicExcel.AppSheetEspeciales::handleRequest
       Runtime: java17
       Timeout: 60
       MemorySize: 1024
@@ -60,7 +59,8 @@ Resources:
         - x86_64
       Policies:
         - S3FullAccessPolicy:
-            BucketName: !Ref BucketName
+            BucketName:
+              Ref: BucketName
         - Statement:
             - Effect: Allow
               Action:
@@ -68,35 +68,52 @@ Resources:
                 - logs:CreateLogStream
                 - logs:PutLogEvents
                 - logs:DeleteLogGroup
-              Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${AWS::StackName}-*
+              Resource:
+                Fn::Sub: arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${AWS::StackName}-*
       Environment:
         Variables:
-          SHEET_NAME: !Ref SheetName
-          BUCKET_NAME: !Ref BucketName
-          FOLDER_SOURCE_PATH: !Ref FolderSourcePath
-          FOLDER_DESTINATION_PATH: !Ref FolderDestinationPath
+          SHEET_NAME:
+            Ref: SheetName
+          BUCKET_NAME:
+            Ref: BucketName
+          FOLDER_SOURCE_PATH:
+            Ref: FolderSourcePath
+          FOLDER_DESTINATION_PATH:
+            Ref: FolderDestinationPath
           JAVA_TOOL_OPTIONS: -XX:+TieredCompilation -XX:TieredStopAtLevel=1
-          SKIP_ROW: !Ref SkipRow
-          EXPECTED_ACCOUNT_ID: !Ref AccountID
-          COLUMNS_TO_INSIDE_TRIM: !Ref ColumnsToInsideTrim
-
+          SKIP_ROW:
+            Ref: SkipRow
+          EXPECTED_ACCOUNT_ID:
+            Ref: AccountID
+          COLUMNS_TO_INSIDE_TRIM:
+            Ref: ColumnsToInsideTrim
+    Metadata:
+      SamResourceId: SheetSpecialesFunction
   LambdaInvokePermission:
     Type: AWS::Lambda::Permission
     DependsOn:
-      - ExcelSupportFunction
+      - SheetSpecialesFunction
     Properties:
       Action: lambda:InvokeFunction
-      FunctionName: !Ref ExcelSupportFunction
+      FunctionName:
+        Ref: SheetSpecialesFunction
       Principal: s3.amazonaws.com
-      SourceArn: !Sub arn:aws:s3:::${BucketName}
-
+      SourceArn:
+        Fn::Sub: arn:aws:s3:::${BucketName}
+    Metadata:
+      SamResourceId: LambdaInvokePermission
 Outputs:
   FunctionArn:
     Description: ARN of the Lambda function
-    Value: !GetAtt ExcelSupportFunction.Arn
+    Value:
+      Fn::GetAtt:
+        - SheetSpecialesFunction
+        - Arn
   FunctionName:
     Description: Name of the Lambda function
-    Value: !Ref ExcelSupportFunction
+    Value:
+      Ref: SheetSpecialesFunction
   BucketName:
     Description: Name of the created S3 bucket
-    Value: !Ref BucketName
+    Value:
+      Ref: BucketName

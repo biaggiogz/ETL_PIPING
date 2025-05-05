@@ -44,6 +44,10 @@ Parameters:
     Type: String
   SchemaName:
     Type: String
+  WBColumns:
+    Type: String
+  SupportColumns:
+    Type: String
 Resources:
 
 
@@ -168,12 +172,14 @@ Resources:
           SUCCESS_SNS_TOPIC_ARN: !Ref SuccessSNSTopic
           FAILURE_SNS_TOPIC_ARN: !Ref FailureSNSTopic
           SCHEMA_NAME: !Ref SchemaName
+          WB_COLUMNS: !Ref WBColumns
+          SUPPORT_COLUMNS: !Ref SupportColumns
 
       Events:
         QueueSupportEvent:
           Type: SQS
           Properties:
-            Queue: !ImportValue QueueURL-Support-ARN
+            Queue: !ImportValue Queueurl-Support-ARN
             BatchSize: 10
             Enabled: true
         QueueWBEvent:

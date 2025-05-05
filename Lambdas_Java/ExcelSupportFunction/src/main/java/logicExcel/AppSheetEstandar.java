@@ -24,8 +24,8 @@ import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.stream.StreamSupport;
 
-public class App implements RequestHandler<S3Event, String> {
-    private static final Logger logger = LoggerFactory.getLogger(App.class);
+public class AppSheetEstandar implements RequestHandler<S3Event, String> {
+    private static final Logger logger = LoggerFactory.getLogger(AppSheetEstandar.class);
     private final S3Client s3Client = S3Client.builder().build();
 
     private static final String SHEET_NAME = System.getenv("SHEET_NAME");
@@ -106,6 +106,7 @@ public class App implements RequestHandler<S3Event, String> {
             throw new RuntimeException("Error processing S3 event", e);
         }
     }
+
     private void processExcelFileInMemory(String sourceBucket, String sourceKey, String csvKey) throws IOException {
 
         // Download Excel file into memory
@@ -137,13 +138,23 @@ public class App implements RequestHandler<S3Event, String> {
 
             Map<String, Integer> columnIndices = getColumnIndices(headerRow);
 
+            // Get list of columns with valid headers
+            List<Integer> validColumns = new ArrayList<>();
+            for (int i = 0; i < headerRow.getLastCellNum(); i++) {
+                Cell headerCell = headerRow.getCell(i);
+                if (headerCell != null && !getCellValueAsString(headerCell).trim().isEmpty()) {
+                    validColumns.add(i);
+                }
+            }
+
             while (rowIterator.hasNext()) {
                 Row row = rowIterator.next();
                 StringBuilder rowContent = new StringBuilder();
-                for (int i = 0; i < row.getLastCellNum(); i++) {
+
+                for (int j = 0; j < validColumns.size(); j++) {
+                    int i = validColumns.get(j);
                     Cell cell = row.getCell(i, Row.MissingCellPolicy.CREATE_NULL_AS_BLANK);
                     String cellValue = getCellValueAsString(cell);
-
 
                     cellValue = cellValue.trim().replace("\u00A0", "");
                     String headerCell = getCellValueAsString(headerRow.getCell(i)).trim();
@@ -155,11 +166,9 @@ public class App implements RequestHandler<S3Event, String> {
                                     .replace("\r", "");     // Handle carriage returns
                     }
 
-
                     if (cellValue.contains("\"") || cellValue.contains("\n")) {
                         cellValue = "\"" + cellValue.replace("\"", "\"\"") + "\"";
                     }
-
 
                     int finalI = i;
                     boolean needsCleaning = columnIndices.entrySet().stream()
@@ -186,9 +195,7 @@ public class App implements RequestHandler<S3Event, String> {
                         rowContent.append(cellValue);
                     }
 
-
-
-                    if (i < row.getLastCellNum() - 1) {
+                    if (j < validColumns.size() - 1) {
                         rowContent.append(CSV_DELIMITER);
                     }
                 }

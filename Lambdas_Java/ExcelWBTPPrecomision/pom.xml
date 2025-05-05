@@ -12,7 +12,7 @@
         <java.version>17</java.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
-<!--  this for Spring Boot      <start-class>logicExcel.AppSheetEspeciales</start-class>-->
+        <start-class>logicExcel.App</start-class>
         <iceberg.version>1.7.2</iceberg.version>
     </properties>
 
@@ -176,12 +176,12 @@
                   <environmentVariables>
                       <EXPECTED_ACCOUNT_ID>881490115226</EXPECTED_ACCOUNT_ID>
                       <AWS_REGION>us-east-1</AWS_REGION>
-                      <SHEET_NAME>Estandar</SHEET_NAME>
+                      <SHEET_NAME>ISOS</SHEET_NAME>
                       <BUCKET_NAME>control-piping-2025</BUCKET_NAME>
-                      <FOLDER_SOURCE_PATH>support/source/</FOLDER_SOURCE_PATH>
-                      <FOLDER_DESTINATION_PATH>support/destination/</FOLDER_DESTINATION_PATH>
-                      <SKIP_ROW>0</SKIP_ROW>
-                      <COLUMNS_TO_TRIM>NM REV,E3DID,SUPPORTID,ESTADO DE FABRICACION NUEVO FORMATO,FECHA,MONTAJE,FECHA2</COLUMNS_TO_TRIM>
+                      <FOLDER_SOURCE_PATH>wb_tp_precom_master/source/</FOLDER_SOURCE_PATH>
+                      <FOLDER_DESTINATION_PATH>wb_tp_precom_master/destination/sheet/isos/</FOLDER_DESTINATION_PATH>
+                      <SKIP_ROW>1</SKIP_ROW>
+                      <COLUMNS_TO_TRIM>DESIGN AREA,ISOMETRICOS IFC3,TP/VT,CAT,TP CAT,TP UNIT,SUBSYSTEM</COLUMNS_TO_TRIM>
                   </environmentVariables>
               </configuration>
         </plugin>

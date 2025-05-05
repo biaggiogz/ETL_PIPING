@@ -1,0 +1,304 @@
+package logicExcel;
+
+import java.io.*;
+import java.io.ByteArrayOutputStream;
+import java.io.FileInputStream;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.util.*;
+import java.util.stream.Collectors;
+import java.util.stream.StreamSupport;
+
+import com.amazonaws.services.lambda.runtime.*;
+import com.amazonaws.services.lambda.runtime.events.APIGatewayProxyRequestEvent;
+import com.amazonaws.services.lambda.runtime.events.APIGatewayProxyResponseEvent;
+
+import com.amazonaws.services.lambda.runtime.Context;
+import com.amazonaws.services.lambda.runtime.RequestHandler;
+import com.amazonaws.services.lambda.runtime.events.S3Event;
+import com.amazonaws.services.lambda.runtime.events.models.s3.S3EventNotification.S3EventNotificationRecord;
+import org.apache.poi.openxml4j.opc.OPCPackage;
+import org.apache.poi.ss.usermodel.*;
+import org.apache.poi.xssf.streaming.SXSSFRow;
+import org.apache.poi.xssf.streaming.SXSSFSheet;
+import org.apache.poi.xssf.streaming.SXSSFWorkbook;
+import org.apache.poi.xssf.usermodel.XSSFSheet;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import software.amazon.awssdk.core.ResponseInputStream;
+import software.amazon.awssdk.core.sync.RequestBody;
+import software.amazon.awssdk.services.s3.S3Client;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import software.amazon.awssdk.services.s3.model.*;
+
+public class App implements RequestHandler<S3Event, String> {
+    private static final Logger logger = LoggerFactory.getLogger(App.class);
+    private final S3Client s3Client = S3Client.builder().build();
+    private static final String EXPECTED_ACCOUNT_ID = System.getenv("EXPECTED_ACCOUNT_ID");
+    private static final String SHEET_NAME = System.getenv("SHEET_NAME");
+    private static final String BUCKET_NAME = System.getenv("BUCKET_NAME");
+    private static final String FOLDER_SOURCE_PATH = System.getenv("FOLDER_SOURCE_PATH");
+    private static final String FOLDER_DESTINATION_PATH = System.getenv("FOLDER_DESTINATION_PATH");
+    private static final int SKIP_ROW = Integer.parseInt(System.getenv("SKIP_ROW"));
+    private static final String CSV_DELIMITER = ",";
+    private static final String ENCODING = "UTF-8";
+    private static final Set<String> COLUMNS_TO_INSIDE_TRIM = new HashSet<>(
+            Arrays.asList(
+                    "NM REV",
+                    "E3DID",
+                    "SUPPORTID",
+                    "ESTADO DE FABRICACION NUEVO FORMATO",
+                    "FECHA",
+                    "MONTAJE",
+                    "FECHA2"
+            )
+    );
+
+    @Override
+    public String handleRequest(S3Event event, Context context) {
+        logger.info("Received S3 event: {}", event);
+        if (event.getRecords() == null || event.getRecords().isEmpty()) {
+            logger.error("No records found in event");
+            return "No records found in event";
+        }
+        try {
+            S3EventNotificationRecord record = event.getRecords().get(0);
+            String sourceBucket = record.getS3().getBucket().getName();
+            String sourceKey = record.getS3().getObject().getUrlDecodedKey();
+            if (!BUCKET_NAME.equals(sourceBucket)){
+                logger.warn("Bucket {} is not the expected bucket, skipping processing", sourceBucket);
+                return "Bucket is not the expected bucket, skipping processing";
+            }
+            if(!sourceKey.startsWith(FOLDER_SOURCE_PATH)){
+                logger.warn("File {} is not in the source folder, skipping processing", sourceKey);
+                return "File is not in the source folder, skipping processing";
+            }
+            if (sourceKey.toLowerCase(Locale.ENGLISH).endsWith(".xlsx")) {
+                logger.info("Processing Excel file: {}", sourceKey);
+                String fileName = sourceKey.substring(sourceKey.lastIndexOf("/") + 1);
+                String baseFileName = fileName.substring(0, fileName.lastIndexOf("."));
+                GetObjectRequest getObjectRequest = GetObjectRequest.builder()
+                        .bucket(sourceBucket)
+                        .key(sourceKey)
+                        .build();
+                logger.info("Attempting to get object from S3 - Bucket: {}, Key: {}",
+                        getObjectRequest.bucket(),
+                        getObjectRequest.key());
+                ResponseInputStream<GetObjectResponse> s3ObjectResponse = s3Client.getObject(getObjectRequest);
+                logger.info("Successfully retrieved object from S3");
+
+
+                StringBuilder csvContent = new StringBuilder();
+
+                try (InputStream fis = s3ObjectResponse;
+                     XSSFWorkbook workbook = new XSSFWorkbook(fis);
+                ) {
+                    XSSFSheet sheet = workbook.getSheet(SHEET_NAME);
+                    if (sheet == null) {
+                        throw new IllegalArgumentException("Sheet " + SHEET_NAME + " not found");
+                    }
+                    // Get the header row first
+                    Row headerRow = sheet.getRow(0);
+                    if (headerRow == null) {
+                        throw new IllegalArgumentException("Header row not found");
+                    }
+
+                    // Normalize headers in the first row
+                    for (Cell cell : headerRow) {
+                        if (cell != null) {
+                            String originalValue = cell.getStringCellValue();
+                            String normalizedValue = originalValue
+//                                    .replaceAll("\\r\\n|\\r|\\n", "_") // Replace any type of line break with underscore
+//                                    .replaceAll("\\s+", " ")
+//                                    .trim();      // Remove leading/trailing spaces
+                                      .replaceAll("\\r\\n|\\r|\\n", "_") // Replace any type of line break with underscore
+                                      .replaceAll("/", "_")              // Replace forward slashes with underscore
+                                      .replaceAll("\\s+", "_")          // Replace any whitespace with underscore
+                                      .trim();
+
+                            // Update the cell with the normalized value
+                            cell.setCellValue(normalizedValue);
+                        }
+                    }
+
+                    Iterator<Row> rowIterator = StreamSupport
+                            .stream(sheet.spliterator(), false)
+                            .skip(SKIP_ROW)
+                            .iterator();
+
+
+                    Map<String, Integer> columnIndices = getColumnIndices(headerRow);
+
+
+
+                    while (rowIterator.hasNext()) {
+                        Row row = rowIterator.next();
+                        StringBuilder rowContent = new StringBuilder(row.getLastCellNum() * 16);
+
+                        for (int i = 0; i < row.getLastCellNum(); i++) {
+                            Cell cell = row.getCell(i, Row.MissingCellPolicy.CREATE_NULL_AS_BLANK);
+                            String cellValue = getCellValueAsString(cell);
+
+                            cellValue = new String(cellValue.getBytes(StandardCharsets.UTF_8), StandardCharsets.UTF_8);
+
+                            cellValue = cellValue.trim().replace("\u00A0", "");
+
+
+                            int finalI = i;
+                            boolean needsCleaning = columnIndices.entrySet().stream()
+                                    .filter(entry -> entry.getValue() == finalI)
+                                    .map(Map.Entry::getKey)
+                                    .anyMatch(COLUMNS_TO_INSIDE_TRIM::contains);
+
+                            if (needsCleaning) {
+                                // Remove all spaces between hyphens
+                                cellValue = cellValue.replaceAll("\\s*-\\s*", "-");
+                                // Remove any remaining whitespace
+                                cellValue = cellValue.replaceAll("\\s+", "");
+                            }
+
+                            boolean needsEscaping = cellValue.indexOf(CSV_DELIMITER) >= 0
+                                    || cellValue.indexOf('"') >= 0
+                                    || cellValue.indexOf('\n') >= 0;
+
+                            if (needsEscaping) {
+                                rowContent.append('"')
+                                        .append(cellValue.replace("\"", "\"\""))
+                                        .append('"');
+                            } else {
+                                rowContent.append(cellValue);
+                            }
+
+                            if (i < row.getLastCellNum() - 1) {
+                                rowContent.append(CSV_DELIMITER);
+                            }
+                        }
+                        csvContent.append(rowContent).append("\n");
+
+                    }
+
+                }
+
+                // Check if CSV content is empty
+                if (csvContent.length() == 0) {
+                    logger.error("CSV content is empty, possibly corrupt");
+                    return "CSV content is empty, possibly corrupt";
+                }
+
+                String key = FOLDER_DESTINATION_PATH + baseFileName + ".csv";
+                String contentWithBOM = "\ufeff" + csvContent.toString();
+                byte[] contentBytes = contentWithBOM.getBytes(StandardCharsets.UTF_8);
+                PutObjectRequest putObjectRequest = PutObjectRequest.builder()
+                        .bucket(BUCKET_NAME)
+                        .key(key)
+                        .contentType("text/csv")
+                        .contentEncoding(ENCODING)
+                        .expectedBucketOwner(EXPECTED_ACCOUNT_ID)
+                        .build();
+
+                try {
+
+                    HeadBucketRequest headBucketRequest = HeadBucketRequest.builder()
+                            .bucket(BUCKET_NAME)
+                            .expectedBucketOwner(EXPECTED_ACCOUNT_ID)
+                            .build();
+
+                    s3Client.headBucket(headBucketRequest);
+
+                    s3Client.putObject(putObjectRequest, RequestBody.fromBytes(contentBytes));
+
+                } catch (S3Exception e) {
+                    if (e.awsErrorDetails().errorCode().equals("403")) {
+                        logger.error("Bucket ownership verification failed for bucket: {}", BUCKET_NAME);
+                        throw new SecurityException("Bucket ownership verification failed");
+                    }
+                    throw e;
+                }
+
+
+
+
+                logger.info("Successfully processed Excel file and converted to CSV: {}", event);
+                return "Successfully processed Excel file and converted to CSV";
+
+            } else {
+                logger.warn("File {} is not an Excel file, skipping processing", sourceKey);
+                return "File is not an Excel file, skipping processing";
+            }
+
+        } catch (S3Exception s3e) {
+            logger.error("S3 operation failed: {}", s3e.getMessage());
+            throw new S3ProcessingException("Failed to process S3 object", s3e);
+        } catch (IOException ioe) {
+            logger.error("IO operation failed while processing file: {}", ioe.getMessage());
+            throw new FileProcessingException("Failed to read/write file", ioe);
+        } catch (Exception e) {
+            logger.error("Error processing S3 event: ", e);
+            throw new RuntimeException("Error processing S3 event", e);
+        }
+
+
+    }
+
+    private Map<String, Integer> getColumnIndices(Row headerRow) {
+        Map<String, Integer> columnIndices = new HashMap<>();
+        for (int i = 0; i < headerRow.getLastCellNum(); i++) {
+            Cell cell = headerRow.getCell(i);
+            if (cell != null) {
+                String columnName = getCellValueAsString(cell).trim();
+                columnIndices.put(columnName, i);
+
+            }
+        }
+        return columnIndices;
+    }
+
+
+    private String getCellValueAsString(Cell cell) {
+        if (cell == null) return "";
+
+        // For formula cells, get the cached result type
+        CellType cellType = cell.getCellType() == CellType.FORMULA
+                ? cell.getCachedFormulaResultType()
+                : cell.getCellType();
+
+        return extractCellValue(cell, cellType);
+    }
+
+    private String extractCellValue(Cell cell, CellType cellType) {
+        switch (cellType) {
+            case STRING:
+                return cell.getStringCellValue();
+            case NUMERIC:
+                return handleNumericCell(cell);
+            case BOOLEAN:
+                return String.valueOf(cell.getBooleanCellValue());
+            default:
+                return "";
+        }
+
+    }
+
+    private String handleNumericCell(Cell cell) {
+        if (DateUtil.isCellDateFormatted(cell)) {
+            return cell.getLocalDateTimeCellValue().toString();
+        }
+        return String.valueOf(cell.getNumericCellValue());
+    }
+
+
+
+
+
+    public class S3ProcessingException extends RuntimeException {
+        public S3ProcessingException(String message, Throwable cause) {
+            super(message, cause);
+        }
+    }
+
+    public class FileProcessingException extends RuntimeException {
+        public FileProcessingException(String message, Throwable cause) {
+            super(message, cause);
+        }
+    }
+}
