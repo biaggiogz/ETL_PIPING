@@ -1,7 +1,11 @@
 aws ecr get-login-password | docker login --username AWS --password-stdin %AWS_ACCOUNT%.dkr.ecr.%AWS_REGION%.amazonaws.com
-docker tag lambda-rds-wb-x86_64:03 %AWS_ACCOUNT%.dkr.ecr.%AWS_REGION%.amazonaws.com/lambda-rds:v03-lambda-rds-support-x86_64
-docker push %AWS_ACCOUNT%.dkr.ecr.%AWS_REGION%.amazonaws.com/lambda-rds:v03-lambda-rds-support-x86_64
 
-docker build -f DockerfileLambda_RDS_WB -t "lambda-rds-wb-x86_64:03" --provenance=false ./
+set v=06
+set name=lambda-rds-wb-x86_64
+
+docker tag %name%:%v% %AWS_ACCOUNT%.dkr.ecr.%AWS_REGION%.amazonaws.com/lambda-rds:v%v%-%name%
+docker push %AWS_ACCOUNT%.dkr.ecr.%AWS_REGION%.amazonaws.com/lambda-rds:v%v%-%name%
+
+docker build -f DockerfileLambda_RDS_WB -t "%name%:%v%" --provenance=false ./
 
 curl -X POST "http://localhost:9000/2015-03-31/functions/function/invocations" -H "Content-Type: application/json" --data-binary @event.json

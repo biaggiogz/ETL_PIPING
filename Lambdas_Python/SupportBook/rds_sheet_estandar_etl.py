@@ -516,29 +516,55 @@ def send_sns_notification(success, details):
         logger.error(f"Failed to send SNS notification: {str(e)}")
         return False
 
-def send_sqs_message(source_name,schema_name,table_name,columns,queue_url):
+def send_sqs_message(source_name, schema_name, table_name, columns, queue_url):
     try:
+        if not all([source_name, schema_name, table_name, columns, queue_url]):
+            logger.error("All parameters must be provided and non-empty")
+            return False
+
+        if isinstance(columns, list) and not columns:
+            logger.error("Columns list cannot be empty")
+            return False
+
         sqs_client = boto3.client('sqs')
 
-        message_body = json.dumps({
+        # Create message body
+        message_body = {
             "detail": {
-                "source_name": source_name,
-                "schema_name": schema_name,
-                "table_name": table_name,
+                "source_name": source_name.strip(),
+                "schema_name": schema_name.strip(),
+                "table_name": table_name.strip(),
                 "columns": columns
             }
+        }
 
-        })
+        for key, value in message_body["detail"].items():
+            if key != "columns" and (not value or value.isspace()):
+                logger.error(f"Invalid value for {key}: {value}")
+                return False
 
+        message_json = json.dumps(message_body)
+
+        if message_json == "{}" or message_json == "null":
+            logger.error("Message body cannot be empty")
+            return False
+
+        # Send message
         response = sqs_client.send_message(
             QueueUrl=queue_url,
-            MessageBody=message_body
+            MessageBody=message_json
         )
+
         logger.info(f"SQS message sent successfully: {response['MessageId']}")
         return True
+
+    except json.JSONDecodeError as je:
+        logger.error(f"JSON encoding error: {str(je)}")
+        return False
     except Exception as e:
         logger.error(f"Failed to send SQS message: {str(e)}")
         return False
+
 
 def loadData(cur, df_format, conn):
     try:

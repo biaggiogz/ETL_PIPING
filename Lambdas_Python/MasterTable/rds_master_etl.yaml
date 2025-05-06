@@ -46,7 +46,13 @@ Parameters:
     Type: String
   WBColumns:
     Type: String
-  SupportColumns:
+  EstandarColumns:
+    Type: String
+  DAPColumns:
+    Type: String
+  EspecialesColumns:
+    Type: String
+  ISOColumns:
     Type: String
 Resources:
 
@@ -145,8 +151,10 @@ Resources:
                   - 'sqs:GetQueueAttributes'
                   - 'sqs:ChangeMessageVisibility'
                 Resource:
-                  - !ImportValue QueueURL-Support-ARN
-                  - !ImportValue QueueURL-WB-ARN
+                  - !ImportValue QUEUE-SUPPORT-ARN
+                  - !ImportValue QUEUEURL-WB-ARN
+                  - !ImportValue QUEUE-WB-TP-ARN
+
 
   LambdaFunction:
     Type: AWS::Serverless::Function
@@ -173,21 +181,60 @@ Resources:
           FAILURE_SNS_TOPIC_ARN: !Ref FailureSNSTopic
           SCHEMA_NAME: !Ref SchemaName
           WB_COLUMNS: !Ref WBColumns
-          SUPPORT_COLUMNS: !Ref SupportColumns
+          ESTANDAR_COLUMNS: !Ref EstandarColumns
+          DAP_COLUMNS: !Ref DAPColumns
+          ESPECIALES_COLUMNS: !Ref EspecialesColumns
+          ISO_COLUMNS: !Ref ISOColumns
 
-      Events:
-        QueueSupportEvent:
-          Type: SQS
-          Properties:
-            Queue: !ImportValue Queueurl-Support-ARN
-            BatchSize: 10
-            Enabled: true
-        QueueWBEvent:
-          Type: SQS
-          Properties:
-            Queue: !ImportValue QueueURL-WB-ARN
-            BatchSize: 10
-            Enabled: true
+  EventSourceMappingSupport:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      EventSourceArn: !ImportValue QUEUE-SUPPORT-ARN
+      FunctionName: !Ref LambdaFunction
+      BatchSize: 10
+      Enabled: true
+
+  QueueSupportInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref LambdaFunction
+      Action: lambda:InvokeFunction
+      Principal: sqs.amazonaws.com
+      SourceArn: !ImportValue QUEUE-SUPPORT-ARN
+
+  EventSourceMappingWB:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      EventSourceArn: !ImportValue QUEUEURL-WB-ARN
+      FunctionName: !Ref LambdaFunction
+      BatchSize: 10
+      Enabled: true
+
+  QueueWBInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref LambdaFunction
+      Action: lambda:InvokeFunction
+      Principal: sqs.amazonaws.com
+      SourceArn: !ImportValue QUEUEURL-WB-ARN
+
+  EventSourceMappingWBTP:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      EventSourceArn: !ImportValue QUEUE-WB-TP-ARN
+      FunctionName: !Ref LambdaFunction
+      BatchSize: 10
+      Enabled: true
+
+  QueueWBTPInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref LambdaFunction
+      Action: lambda:InvokeFunction
+      Principal: sqs.amazonaws.com
+      SourceArn: !ImportValue QUEUE-WB-TP-ARN
+
+
 
 Outputs:
   LambdaFunctionArn:

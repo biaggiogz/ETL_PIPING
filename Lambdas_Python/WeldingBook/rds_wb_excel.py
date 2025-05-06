@@ -207,6 +207,35 @@ def format_value(val):
         return str(int(val))  # Convert float to int before string conversion
     return str(val)
 
+def classify_mat(spec):
+    if pd.notna(spec):
+        if spec.startswith('UI'):
+            return 'CS'
+        elif 'U4' in spec:
+            return 'SS'
+    return np.nan
+
+def assign_unidades(area):
+    if pd.isna(area):
+        return np.nan
+    if area.startswith('A'):
+        try:
+            suffix = int(area[-4:])
+            if suffix not in {1, 3, 4, 5}:
+                return 'UE'
+        except ValueError:
+            pass
+    elif area.startswith('P'):
+        try:
+            suffix = int(area[-2:])
+            if suffix not in {18, 19}:
+                return 'PE'
+        except ValueError:
+            pass
+    return np.nan
+
+
+
 def transformationsETL(df):
 
 
@@ -216,7 +245,28 @@ def transformationsETL(df):
 
     df['e3did'] = '/' + df[['area', 'dn', 'line_fluid', 'id_line', 'specification', 'ins_trac_tren']].applymap(format_value).agg('-'.join, axis=1)
     df['record'] = df.groupby(['e3did']).cumcount() + 1
-    df['line_id'] = df['line_fluid'] + df['id_line']
+    df['line_id'] = df['line_fluid'].astype(str) + '-' + df['id_line'].astype(int).astype(str)
+    df['cut'] = np.where(
+        df['welding_no'].notna() & df['welding_no'].astype(str).str.contains('C'),
+        'CUT',
+        None
+    ).astype(object)
+
+    df['mat'] = df['specification'].apply(classify_mat).astype(object)
+
+    dn_numeric = pd.to_numeric(df['dn'], errors='coerce')
+    df['diametro'] = np.where(dn_numeric.isna(), None,
+                              np.where(dn_numeric >= 50, 'BIG', 'SMALL')).astype(object)
+
+    df['turno'] = np.where(
+        (df['obsv'].notnull()) & (df['obsv'] == 'TURNODENOCHE'),
+        'N',
+        None
+    ).astype(object)
+
+    df['unidades_existentes'] = df['area'].apply(assign_unidades).astype(object)
+
+    df['spool'] = df['spool'].apply(lambda x: x if pd.isna(x) or len(str(x)) <= 4 else None)
 
 
     return df
@@ -270,6 +320,7 @@ def createTable(cur, df_format, conn):
     except Exception as e:
         logger.error(f"Error creating table: {str(e)}")
         return False
+
 
 def send_sns_notification(success, details):
     try:

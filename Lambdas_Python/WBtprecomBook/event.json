@@ -27,7 +27,7 @@
           "arn": "arn:aws:s3:::lambda-artifacts-deafc19498e3f2df"
         },
         "object": {
-          "key": "weldingbook/destination/23TEIGA-00000-ML-B1304-6800-0711-0001-30-04-25.csv",
+          "key": "wb_tp_precom_master/destination/sheet/isos/WB_TP_PRECOM_MASTER.csv",
           "size": 1305107,
           "eTag": "b21b84d653bb07b05b1e6b33684dc11b",
           "sequencer": "0C0F6F405D6ED209E1"

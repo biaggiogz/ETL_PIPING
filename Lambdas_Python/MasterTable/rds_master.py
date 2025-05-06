@@ -17,6 +17,7 @@ import socket
 from psycopg2 import sql
 from botocore.exceptions import ClientError
 import datetime
+from functools import reduce
 import functools
 import html
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -39,6 +40,7 @@ WB_COLUMNS=os.environ['WB_COLUMNS']
 ESTANDAR_COLUMNS=os.environ['ESTANDAR_COLUMNS']
 DAP_COLUMNS=os.environ['DAP_COLUMNS']  #data pressure columns
 ESPECIALES_COLUMNS=os.environ['ESPECIALES_COLUMNS']
+ISO_COLUMNS=os.environ['ISO_COLUMNS']
 
 def setup_logger(name: str = None) -> logging.Logger:
     logger = logging.getLogger(name)
@@ -174,6 +176,114 @@ def send_sns_notification(success, details):
         logger.error(f"Failed to send SNS notification: {str(e)}")
         return False
 
+def infer_column_type(col: pd.Series, threshold: float = 0.95) -> str:
+
+    clean_col = col.dropna()
+    if len(clean_col) == 0:
+        return 'string'
+
+    total_rows = len(clean_col)
+
+    def check_numeric():
+        try:
+            pd.to_numeric(clean_col, downcast='integer')
+            int_success = np.sum(clean_col.astype(str).str.match(r'^-?\d+$')) / total_rows
+            if int_success >= threshold:
+                return 'integer'
+
+            pd.to_numeric(clean_col, downcast='float')
+            float_success = np.sum(clean_col.astype(str).str.match(r'^-?\d+\.?\d*$')) / total_rows
+            if float_success >= threshold:
+                return 'float'
+        except:
+            return None
+
+    def check_datetime():
+        try:
+            pd.to_datetime(clean_col)
+            datetime_success = np.sum(pd.to_datetime(clean_col, errors='coerce').notna()) / total_rows
+            if datetime_success >= threshold:
+                return 'datetime'
+        except:
+            return None
+
+    def check_boolean():
+        bool_values = {'true', 'false', '1', '0', 'yes', 'no'}
+        bool_success = np.sum(clean_col.astype(str).str.lower().isin(bool_values)) / total_rows
+        if bool_success >= threshold:
+            return 'boolean'
+        return None
+
+    for type_check in [check_numeric, check_datetime, check_boolean]:
+        result = type_check()
+        if result:
+            return result
+
+    # Default to string if no other type matches
+    return 'string'
+
+def get_pandas_dtype(type_str: str) -> Union[str, np.dtype]:
+
+    dtype_mapping = {
+        'integer': 'Int64',
+        'float': 'float64',
+        'datetime': 'datetime64[ns]',
+        'boolean': 'boolean',
+        'string': 'string'
+    }
+    return dtype_mapping.get(type_str, 'string')
+
+def format_dataframe_columns(df: pd.DataFrame, threshold: float = 0.95) -> pd.DataFrame:
+
+    formatted_df = df.copy()
+
+    conversion_errors = {}
+
+    for column in formatted_df.columns:
+        try:
+            inferred_type = infer_column_type(formatted_df[column], threshold)
+            pandas_dtype = get_pandas_dtype(inferred_type)
+
+            if inferred_type == 'datetime':
+                formatted_df[column] = pd.to_datetime(formatted_df[column], errors='coerce')
+            elif inferred_type == 'boolean':
+                formatted_df[column] = formatted_df[column].astype(str).str.lower()
+                formatted_df[column] = formatted_df[column].map({
+                    'true': True, 'false': False,
+                    '1': True, '0': False,
+                    'yes': True, 'no': False
+                })
+            else:
+                formatted_df[column] = formatted_df[column].replace(['', 'N/A', 'na', 'null'], pd.NA)
+
+                formatted_df[column] = formatted_df[column].astype(pandas_dtype)
+
+
+        except Exception as e:
+            conversion_errors[column] = str(e)
+            print(f"Warning: Could not convert column '{column}'. Error: {str(e)}")
+
+    if conversion_errors:
+        print("\nConversion errors summary:")
+        for col, error in conversion_errors.items():
+            print(f"Column '{col}': {error}")
+
+    return formatted_df
+
+def clean_column_names(df):
+    def clean_name(name):
+        # Normalize and remove accents
+        name = unicodedata.normalize('NFKD', name).encode('ASCII', 'ignore').decode('ASCII')
+        name = name.lower()  # Lowercase early
+        name = ''.join(c if c.isalnum() else '_' for c in name)
+        name = name.strip('_')  # Strip leading/trailing underscores
+        if name and name[0].isdigit():
+            name = 'col_' + name
+        while '__' in name:
+            name = name.replace('__', '_')
+        return name
+    df.columns = [clean_name(col) for col in df.columns]
+    return df
 
 def create_dataframe_from_event(conn, event_detail: Dict) -> pd.DataFrame:
     schema_name = event_detail['schema_name']
@@ -218,6 +328,7 @@ def get_predefined_query_df(query_type: str) -> pd.DataFrame:
             'ESTANDAR': f"SELECT {ESTANDAR_COLUMNS} FROM {SCHEMA_NAME}.source_support",
             'ESPECIALES': f"SELECT {ESPECIALES_COLUMNS} FROM {SCHEMA_NAME}.source_sps",
             'WB': f"SELECT {WB_COLUMNS} FROM {SCHEMA_NAME}.source_wb",
+            'ISOS': f"SELECT {ISO_COLUMNS} FROM {SCHEMA_NAME}.source_isos",
             'DAPRESSURE':  f"SELECT {DAP_COLUMNS} FROM {SCHEMA_NAME}.source_dapressure"
         }
 
@@ -234,10 +345,10 @@ def get_predefined_query_df(query_type: str) -> pd.DataFrame:
             conn.close()
         raise
 
-def get_dataframes(event_detail: Dict) -> Tuple[Optional[pd.DataFrame], Optional[pd.DataFrame], Optional[pd.DataFrame], Optional[pd.DataFrame]]:
+def get_dataframes(event_detail: Dict) -> Tuple[Optional[pd.DataFrame], Optional[pd.DataFrame], Optional[pd.DataFrame], Optional[pd.DataFrame],Optional[pd.DataFrame]]:
     logger.info("Starting get_dataframes process")
     source_name = event_detail['source_name']
-    df_a = df_b = df_c = df_d = None
+    df_a = df_b = df_c = df_d = df_e=None
     pool = get_connection_pool()
     conn = pool.getconn()
 
@@ -249,25 +360,33 @@ def get_dataframes(event_detail: Dict) -> Tuple[Optional[pd.DataFrame], Optional
             df_a = main_df
             df_b = get_predefined_query_df('ESTANDAR')
             df_c = get_predefined_query_df('ESPECIALES')
+            df_d = get_predefined_query_df('ISOS')
         elif source_name == 'ESTANDAR':
             df_b = main_df
             df_a = get_predefined_query_df('WB')
             df_c = get_predefined_query_df('ESPECIALES')
+            df_d = get_predefined_query_df('ISOS')
         elif source_name == 'ESPECIALES':
             df_c = main_df
             df_a = get_predefined_query_df('WB')
             df_b = get_predefined_query_df('ESTANDAR')
+            df_d = get_predefined_query_df('ISOS')
+        elif source_name == 'ISOS':
+            df_d = main_df
+            df_a = get_predefined_query_df('WB')
+            df_b = get_predefined_query_df('ESTANDAR')
+            df_c = get_predefined_query_df('ESPECIALES')
         else:
             logger.error(f"Unknown source: {source_name}")
             raise ValueError(f"Unknown source: {source_name}")
 
-        df_d = get_predefined_query_df('DAPRESSURE')
+        df_e = get_predefined_query_df('DAPRESSURE')
 
         logger.info(f"Successfully retrieved DataFrames for source: {source_name}")
-        return df_a, df_b, df_c, df_d
+        return df_a, df_b, df_c, df_d, df_e
 
     except Exception as e:
-        logger.exception(f"Error in get_dataframes for source: {source_name}")
+        logger.exception(f"Error {e} in get_dataframes for source: {source_name}")
         raise
     finally:
         pool.putconn(conn)
@@ -302,7 +421,7 @@ def get_dataframes(event_detail: Dict) -> Tuple[Optional[pd.DataFrame], Optional
 #         logger.error(f"Error creating master table: {str(e)}")
 #         raise
 
-def create_table_master(df_a: pd.DataFrame, df_b: pd.DataFrame ,df_c: pd.DataFrame, df_d: pd.DataFrame) -> pd.DataFrame:
+def create_table_master(df_a: pd.DataFrame, df_b: pd.DataFrame ,df_c: pd.DataFrame, df_d: pd.DataFrame,df_e: pd.DataFrame) -> pd.DataFrame:
     logger.info("Creating master table from DataFrames")
 
     tables = [df_a,df_b,df_c]
@@ -324,17 +443,19 @@ def create_table_master(df_a: pd.DataFrame, df_b: pd.DataFrame ,df_c: pd.DataFra
         for df in tables:
             result = result.merge(df, on=['e3did', 'record'], how='left')
 
-        pre_result = result.sort_values(['e3did', 'record']).reset_index(drop=True)
+        post_result = result.sort_values(['e3did', 'record']).reset_index(drop=True)
+        if post_result.duplicated(subset=['e3did', 'record']).any():
+            logger.warning("Duplicates detected in the master table!")
 
-        final_result = pre_result.merge(df_d, on=['e3did'], how='left')
+        merge_isos = post_result.merge(df_d, on=['e3did'], how='left')
+
+        merge_dapressure = merge_isos.merge(df_e, on=['line_fluid'], how='left')
 
 
-        return final_result
+        return merge_dapressure
     except Exception as e:
         logger.error(f"Error creating master table: {str(e)}")
         raise
-
-
 
 def dropTableIFExist(cur):
     try:
@@ -387,11 +508,23 @@ def createTable(cur, df_format, conn):
         logger.error(f"Error creating table: {str(e)}")
         return False
 
-def loadData(cur, df_format, conn):
+def loadData(cur, df, conn):
+
+    df_format = format_dataframe_columns(df,09.5)
+
     try:
+
+
         if conn.closed:
             logger.error("Database connection is closed")
             raise Exception("Database connection is closed")
+
+        truncate_query = sql.SQL("TRUNCATE TABLE {}.{}").format(
+            sql.Identifier(SCHEMA_NAME),
+            sql.Identifier(NAME_TABLE)
+        )
+        cur.execute(truncate_query)
+        logger.info(f"Successfully truncated table {SCHEMA_NAME}.{NAME_TABLE}")
 
         logger.info(f"Loading data into source_{NAME_TABLE}...")
 
@@ -426,7 +559,65 @@ def loadData(cur, df_format, conn):
         )
         return False
 
-def pusblishTable(master_df):
+
+def sync_table_columns(cur, df):
+    try:
+        df_format = format_dataframe_columns(df, 0.95)
+        schema_name = SCHEMA_NAME
+        table_name = NAME_TABLE
+
+        if not isinstance(df_format, pd.DataFrame):
+            raise ValueError("Input must be a valid pandas DataFrame")
+
+        if df_format.empty:
+            logger.warning("Empty DataFrame provided, no column sync needed")
+            return True
+
+        if not all([schema_name, table_name]):
+            raise ValueError("Schema name and table name must not be empty")
+
+        logger.info(f"Syncing columns for table {schema_name}.{table_name}")
+
+        cur.execute("""
+            SELECT column_name FROM information_schema.columns
+            WHERE table_schema = %s AND table_name = %s
+        """, (schema_name, table_name))
+        existing_cols = {row[0] for row in cur.fetchall()}
+
+        for col in df_format.columns:
+            if col not in existing_cols:
+                dtype = df_format[col].dtype
+
+                if pd.api.types.is_integer_dtype(dtype):
+                    pg_type = "INTEGER"
+                elif pd.api.types.is_float_dtype(dtype):
+                    pg_type = "FLOAT"
+                elif pd.api.types.is_bool_dtype(dtype):
+                    pg_type = "BOOLEAN"
+                elif pd.api.types.is_datetime64_any_dtype(dtype):
+                    pg_type = "TIMESTAMP"
+                else:
+                    max_len = df_format[col].astype(str).map(len).max()
+                    pg_type = f"VARCHAR({min(max_len + 20, 255)})"
+
+                alter_query = sql.SQL("ALTER TABLE {}.{} ADD COLUMN {} {}").format(
+                    sql.Identifier(schema_name),
+                    sql.Identifier(table_name),
+                    sql.Identifier(col),
+                    sql.SQL(pg_type)
+                )
+                cur.execute(alter_query)
+                logger.info(f"Added missing column '{col}' as type {pg_type}")
+
+        return True
+
+    except Exception as e:
+        logger.error(f"Error syncing columns for table {SCHEMA_NAME}.{NAME_TABLE}: {str(e)}")
+        return False
+
+
+
+def pusblishTable(df):
     logger.info("Starting table publishing process")
     try:
         credentials = get_secret(os.environ.get("SECRET_NAME"))
@@ -441,22 +632,26 @@ def pusblishTable(master_df):
             sslmode='require'
         )
         cur = conn.cursor()
-
-        if not dropTableIFExist(cur):
-            logger.error("Failed to drop the table. Aborting publish.")
+        if not sync_table_columns(cur, df):
+            logger.error("Failed to sync table columns. Aborting sycn tables.")
             cur.close()
             conn.close()
-            return
-        if not createTable(cur,master_df,conn):
-            logger.error("Failed to create the table. Aborting publish.")
+        if not loadData(cur, df, conn):
+            logger.error("Failed to update the table. Aborting publish.")
             cur.close()
             conn.close()
-            return
-        if not loadData(cur, master_df, conn):
-            logger.error("Failed to load data to the table. Aborting publish.")
-            cur.close()
-            conn.close()
-            return
+        # if not dropTableIFExist(cur):
+        #     logger.error("Failed to drop the table. Aborting publish.")
+        #     cur.close()
+        #     conn.close()
+        # if not createTable(cur,master_df,conn):
+        #     logger.error("Failed to create the table. Aborting publish.")
+        #     cur.close()
+        #     conn.close()
+        # if not loadData(cur, master_df, conn):
+        #     logger.error("Failed to load data to the table. Aborting publish.")
+        #     cur.close()
+        #     conn.close()
 
         cur.close()
         conn.commit()
@@ -493,13 +688,14 @@ def lambda_handler(event, context):
 
         logger.info(f"Processing event detail: {event_detail}")
 
-        df_a, df_b , df_c, df_d = get_dataframes(event_detail)
+        df_a, df_b, df_c, df_d, df_e = get_dataframes(event_detail)
 
         if df_a is None or df_b is None:
             logger.error("Failed to create one or both DataFrames")
             raise ValueError("Failed to create one or both DataFrames")
 
-        df = create_table_master(df_a, df_b)
+
+        df = create_table_master(df_a, df_b,df_c,df_d,df_e)
         pusblishTable(df)
 
         logger.info("Lambda execution completed successfully")

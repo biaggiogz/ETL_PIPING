@@ -294,10 +294,10 @@ Outputs:
     Description: URL of the created SQS queue
     Value: !Ref MyQueue
     Export:
-      Name: "Queueurl-Support"
+      Name: "QUEUEURL-SUPPORT"
 
   QueueARN:
     Description: ARN of the created SQS queue
     Value: !GetAtt MyQueue.Arn
     Export:
-      Name: "Queueurl-Support-ARN"
+      Name: "QUEUE-SUPPORT-ARN"

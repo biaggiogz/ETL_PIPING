@@ -16,4 +16,4 @@ RUN pip install --upgrade pip && \
 
 # Handler configuration
 COPY rds_sheet_isos_etl.py ${LAMBDA_TASK_ROOT}
-CMD ["rds_wb_excel.lambda_handler"]
+CMD ["rds_sheet_isos_etl.lambda_handler"]

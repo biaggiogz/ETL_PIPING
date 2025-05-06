@@ -1,35 +1,23 @@
-
-//        "detail":{
-//          "source_name":"SUPPORT",
-//          "schema_name":"user_01",
-//          "table_name":"support",
-//          "columns":[
-//            "record",
-//            "e3did",
-//            "supportid",
-//            "fecha",
-//            "fecha2",
-//            "montaje"
-//          ]}
 {
-  "Records": [
+  "Records":[
     {
-      "messageId": "d9144555-9a4f-4ec3-99a0-fc4e625a8db2",
-      "receiptHandle": "7kam5bfzbDsjtcjElvhSbxeLJbeey3A==",
-      "body": "",
-      "attributes": {
-        "ApproximateReceiveCount": "1",
-        "SentTimestamp": "1601975709495",
-        "SenderId": "AROAIFU457DVZ5L2J53F2",
-        "ApproximateFirstReceiveTimestamp": "1601975709499"
+      "messageId":"41827081-40ce-41ad-ac9d-9aadc450e143",
+      "receiptHandle":"AQEB7pGdCvFvEuQ7MJxAlFjcNbPVqVNQyQwPHJiQKu5BKY37di6/2hs+MNwC17erpvZ1Z3zaF0Xo8AOpVEM/jhIsoxJd8OMuR/zHuhnDrCF34qvEKihJYwuFtUc6IfIVFtZi74YzdiGEh9Ct4GCh9YOn7ea6oR09CSkBum0zly7TbaPnyWOaYsieVvDdAPHXqzMHKk7Vs3T3cQjWOVbeQATxBeIgo4w/TLsRfR13+2po4JALAXCw8mLVscfolMnYGABaKNB1oRD/zIYZP4bqlWtUWjUbsH+2L71Pe2s9CJkUdMWytc9tJZh9/OKhf7ajXt94yH6v1L7Fgvecuvocber78pmFNk7tKarhiQK6e1TrXSPpF2S/TC14nBul/q96CTohsfwz3qixtrRiZ8mwpy1ulA==",
+      "body":"{\"detail\": {\"source_name\": \"WB\", \"schema_name\": \"user_01\", \"table_name\": \"wb\", \"columns\": [\"record\", \"e3did\", \"spool\", \"total\", \"fw_sw\", \"line_fluid\", \"id_line\", \"area\", \"dn\", \"ins_trac_tren\", \"specification\", \"date_execut\", \"test_pack\"]}}",
+      "attributes":{
+        "ApproximateReceiveCount":"1",
+        "AWSTraceHeader":"Root=1-6818e5fa-10f568375365682356703c87;Parent=55a29984f5de15ee;Sampled=0;Lineage=1:434882c5:0",
+        "SentTimestamp":"1746462210044",
+        "SenderId":"AROA42PHHXKNB3WQA6LJW:lambda-rds-wb-etl-x86-64",
+        "ApproximateFirstReceiveTimestamp":"1746462210050"
       },
-      "messageAttributes": {
+      "messageAttributes":{
 
       },
-      "md5OfBody": "0f96e88a291edb4429f2f7b9fdc3df96",
-      "eventSource": "aws:sqs",
-      "eventSourceARN": "arn:aws:sqs:eu-central-1:123456789012:TestLambda",
-      "awsRegion": "eu-central-1"
+      "md5OfBody":"10b698d9cdbe616ceebc6c2c409bdf76",
+      "eventSource":"aws:sqs",
+      "eventSourceARN":"arn:aws:sqs:us-east-1:881490115226:queue-lambda-rds-wb-etl-x86-64",
+      "awsRegion":"us-east-1"
     }
   ]
 }

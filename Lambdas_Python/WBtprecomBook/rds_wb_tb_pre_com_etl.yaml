@@ -21,7 +21,7 @@ Parameters:
     Description: 'Optional: Lambda memory in MB (min 128 - 10,240 max).'
     Default: 3008
     Type: Number
-  LambdaName:
+  LambdaNameSheetISOS:
     Description: 'Optional: Override the default Lambda function name.'
     Type: String
     Default: ''
@@ -48,7 +48,12 @@ Parameters:
     Type: String
   ColumnsToMaster:
     Type: String
+  S3FolderDestinationSheetISOS:
+    Type: String
+    Default: 'wb_tp_precom_master/destination/sheet/isos/'
 Resources:
+
+
 
 
   LambdaExecutionRole:
@@ -95,8 +100,7 @@ Resources:
                 Action:
                   - 's3:*'
                 Resource:
-                  - !Sub 'arn:aws:s3:::${BucketName}/weldingbook/destination/*'
-                  - !Sub 'arn:aws:s3:::${BucketName}/weldingbook/processed/*'
+                  - !Sub 'arn:aws:s3:::${BucketName}/${S3FolderDestinationSheetISOS}*'
         - PolicyName: 'RDSAccess'
           PolicyDocument:
             Version: '2012-10-17'
@@ -114,7 +118,7 @@ Resources:
                   - 'logs:CreateLogGroup'
                   - 'logs:CreateLogStream'
                   - 'logs:PutLogEvents'
-                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${AWS::StackName}:*'
+                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${LambdaNameSheetISOS}:*'
         - PolicyName: 'SecretsAccess'
           PolicyDocument:
             Version: '2012-10-17'
@@ -132,8 +136,8 @@ Resources:
                 Action:
                   - 'sns:Publish'
                 Resource:
-                  - !Sub 'arn:aws:sns:${AWS::Region}:${AWS::AccountId}:SuccessFullWeldingBook'
-                  - !Sub 'arn:aws:sns:${AWS::Region}:${AWS::AccountId}:FailureWeldingBook'
+                  - !Sub 'arn:aws:sns:${AWS::Region}:${AWS::AccountId}:SuccessfullWBTPBook'
+                  - !Sub 'arn:aws:sns:${AWS::Region}:${AWS::AccountId}:FailureWBTPBook'
         - PolicyName: 'SQSAccess'
           PolicyDocument:
             Version: '2012-10-17'
@@ -144,11 +148,11 @@ Resources:
                   - 'sqs:GetQueueAttributes'
                 Resource: !GetAtt MyQueue.Arn
 
-  LambdaFunction:
+  LambdaFunctionSheetISOS:
     Type: AWS::Serverless::Function
     Properties:
       PackageType: Image
-      FunctionName: !Ref LambdaName
+      FunctionName: !Ref LambdaNameSheetISOS
       ImageUri: !Ref ImageUri
       Description: Lambda to run Spark containers
       Timeout: !Ref LambdaTimeout
@@ -172,12 +176,34 @@ Resources:
           SCHEMA_NAME: !Ref SchemaName
           COLUMNS_TO_MASTER: !Ref ColumnsToMaster
 
+
+  LambdaLogGroupISOS:
+    Type: AWS::Logs::LogGroup
+    DependsOn: LambdaFunctionSheetISOS
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${LambdaNameSheetISOS}
+      RetentionInDays: 5
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+    Metadata:
+      SamResourceId: LambdaFunctionSheetISOS
+
+  S3BucketEventPermission:
+    Type: AWS::Lambda::Permission
+    DependsOn:
+      - LambdaFunctionSheetISOS
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      FunctionName: !Ref LambdaFunctionSheetISOS
+      Principal: s3.amazonaws.com
+      SourceArn: !Sub 'arn:aws:s3:::${BucketName}'
   MyQueue:
     Type: AWS::SQS::Queue
     Properties:
       QueueName: !Sub 'queue-${AWS::StackName}'
-      VisibilityTimeout: 30
-      MessageRetentionPeriod: 7200
+      VisibilityTimeout: 240
+      MessageRetentionPeriod: 600
       SqsManagedSseEnabled: true
 
   QueuePolicy:
@@ -199,7 +225,7 @@ Resources:
 Outputs:
   LambdaFunctionArn:
     Description: Lambda Function ARN
-    Value: !GetAtt LambdaFunction.Arn
+    Value: !GetAtt LambdaFunctionSheetISOS.Arn
     Export:
       Name: !Sub "${AWS::StackName}-LambdaFunctionArn"
 
@@ -207,10 +233,10 @@ Outputs:
     Description: URL of the created SQS queue
     Value: !Ref MyQueue
     Export:
-      Name: "QueueURL-WB"
+      Name: "QUEUE-WB-TP"
 
   QueueARN:
     Description: ARN of the created SQS queue
     Value: !GetAtt MyQueue.Arn
     Export:
-      Name: "QueueURL-WB-ARN"
+      Name: "QUEUE-WB-TP-ARN"

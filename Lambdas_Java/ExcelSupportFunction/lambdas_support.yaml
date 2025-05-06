@@ -1,0 +1,308 @@
+﻿# Added description to better explain template purpose
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >-
+  Excel file processor Lambda functions for processing Especiales and Estandar sheets,
+  converting Excel files to CSV format with configurable parameters for paths and columns
+
+Globals:
+  Function:
+    LoggingConfig:
+      LogFormat: JSON
+    Tags:
+      Application: ExcelSupportProcessor
+      Environment:
+        Ref: AWS::StackName
+
+Parameters:
+  BucketName:
+    Type: String
+    Description: Name of the S3 bucket to monitor
+    MinLength: 3
+    MaxLength: 63
+    AllowedPattern: ^[a-z0-9][a-z0-9.-]*[a-z0-9]$
+    ConstraintDescription: Bucket name must be between 3 and 63 characters, start and end with lowercase letter or number, and contain only lowercase letters, numbers, dots and hyphens
+
+  AccountID:
+    Type: String
+    Description: Account ID of the destination S3 bucket
+    AllowedPattern: ^\d{12}$
+    ConstraintDescription: Must be a valid 12-digit AWS account ID
+
+  SheetNameEspeciales:
+    Type: String
+    Description: Name of the sheet within the Excel file for special supports
+    Default: 'Especiales'
+    MinLength: 1
+
+  SheetNameEstandar:
+    Type: String
+    Description: Name of the sheet within the Excel file for standard supports
+    Default: 'Estandar'
+    MinLength: 1
+
+  FolderSourcePath:
+    Type: String
+    Description: Source folder path to monitor for incoming Excel files
+    Default: 'support/source/'
+    MinLength: 1
+
+  FolderDestinationPathEspeciales:
+    Type: String
+    Description: Destination folder path to save processed CSV files for special supports
+    Default: 'support/destination/sheet/especiales/'
+    MinLength: 1
+
+  FolderDestinationPathEstandar:
+    Type: String
+    Description: Destination folder path to save processed CSV files for standard supports
+    Default: 'support/destination/sheet/estandar/'
+    MinLength: 1
+
+  SkipRow:
+    Type: String
+    Description: Number of header rows to skip in the Excel file
+    AllowedPattern: ^\d+$
+    ConstraintDescription: Must be a positive integer
+
+  ColumnsToInsideTrimEspeciales:
+    Type: String
+    Description: Comma-separated list of columns to trim whitespace in special supports sheet
+    Default: 'SPECIAL SUPPORT NUMBER,Nº LINE,REFERENCE DOCUMENT,MANUFACTURING STATUS,DATE,ERECTION'
+    MinLength: 1
+
+  ColumnsToInsideTrimEstandar:
+    Type: String
+    Description: Comma-separated list of columns to trim whitespace in standard supports sheet
+    Default: 'NM REV,E3DID,SUPPORTID,ESTADO DE FABRICACION NUEVO FORMATO,FECHA,MONTAJE,FECHA2,TESTPACKASOCIADO'
+    MinLength: 1
+
+  FunctionNameEspeciales:
+    Type: String
+    Description: Name of the Lambda function for processing special supports
+    Default: 'lambda-java-sheet-especiales-x86-64'
+    MinLength: 1
+
+  FunctionNameEstandar:
+    Type: String
+    Description: Name of the Lambda function for processing standard supports
+    Default: 'lambda-java-sheet-estandar-x86-64'
+    MinLength: 1
+
+Resources:
+  SheetEspecialesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Ref: FunctionNameEspeciales
+      CodeUri: .
+      Handler: logicExcel.AppSheetEspeciales::handleRequest
+      Runtime: java17
+      Timeout: 60
+      MemorySize: 1024
+      Architectures:
+        - x86_64
+      Policies:
+        - S3FullAccessPolicy:
+            BucketName:
+              Ref: BucketName
+        - Statement:
+            - Effect: Allow
+              Action:
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+                - logs:DeleteLogGroup
+              Resource:
+                Fn::Sub: arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${FunctionNameEspeciales}:*
+      Environment:
+        Variables:
+          SHEET_NAME:
+            Ref: SheetNameEspeciales
+          BUCKET_NAME:
+            Ref: BucketName
+          FOLDER_SOURCE_PATH:
+            Ref: FolderSourcePath
+          FOLDER_DESTINATION_PATH:
+            Ref: FolderDestinationPathEspeciales
+          JAVA_TOOL_OPTIONS: -XX:+TieredCompilation -XX:TieredStopAtLevel=1
+          SKIP_ROW:
+            Ref: SkipRow
+          EXPECTED_ACCOUNT_ID:
+            Ref: AccountID
+          COLUMNS_TO_INSIDE_TRIM:
+            Ref: ColumnsToInsideTrimEspeciales
+    Metadata:
+      SamResourceId: SheetEspecialesFunction
+
+  SheetEstandarFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Ref: FunctionNameEstandar
+      CodeUri: .
+      Handler: logicExcel.AppSheetEstandar::handleRequest
+      Runtime: java17
+      Timeout: 60
+      MemorySize: 1024
+      Architectures:
+        - x86_64
+      Policies:
+        - S3FullAccessPolicy:
+            BucketName:
+              Ref: BucketName
+        - Statement:
+            - Effect: Allow
+              Action:
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+                - logs:DeleteLogGroup
+              Resource:
+                Fn::Sub: arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${FunctionNameEstandar}:*
+      Environment:
+        Variables:
+          SHEET_NAME:
+            Ref: SheetNameEstandar
+          BUCKET_NAME:
+            Ref: BucketName
+          FOLDER_SOURCE_PATH:
+            Ref: FolderSourcePath
+          FOLDER_DESTINATION_PATH:
+            Ref: FolderDestinationPathEstandar
+          JAVA_TOOL_OPTIONS: -XX:+TieredCompilation -XX:TieredStopAtLevel=1
+          SKIP_ROW:
+            Ref: SkipRow
+          EXPECTED_ACCOUNT_ID:
+            Ref: AccountID
+          COLUMNS_TO_INSIDE_TRIM:
+            Ref: ColumnsToInsideTrimEstandar
+    Metadata:
+      SamResourceId: SheetEstandarFunction
+
+  LambdaLogGroupEspeciales:
+    Type: AWS::Logs::LogGroup
+    DependsOn: SheetEspecialesFunction
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${FunctionNameEspeciales}
+      RetentionInDays: 5
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+    Metadata:
+      SamResourceId: LambdaLogGroupEspeciales
+
+  LambdaLogGroupEstandar:
+    Type: AWS::Logs::LogGroup
+    DependsOn: SheetEstandarFunction
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${FunctionNameEstandar}
+      RetentionInDays: 5
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+    Metadata:
+      SamResourceId: LambdaLogGroupEstandar
+
+  LambdaInvokePermissionEspeciales:
+    Type: AWS::Lambda::Permission
+    DependsOn:
+      - SheetEspecialesFunction
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName:
+        Ref: SheetEspecialesFunction
+      Principal: s3.amazonaws.com
+      SourceArn:
+        Fn::Sub: arn:aws:s3:::${BucketName}
+    Metadata:
+      SamResourceId: LambdaInvokePermissionEspeciales
+
+  LambdaInvokePermissionEstandar:
+    Type: AWS::Lambda::Permission
+    DependsOn:
+      - SheetEstandarFunction
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName:
+        Ref: SheetEstandarFunction
+      Principal: s3.amazonaws.com
+      SourceArn:
+        Fn::Sub: arn:aws:s3:::${BucketName}
+    Metadata:
+      SamResourceId: LambdaInvokePermissionEstandar
+
+  ProcessingDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    DependsOn:
+      - SheetEspecialesFunction
+      - SheetEstandarFunction
+    Properties:
+      DashboardName: !Sub ${AWS::StackName}-ExcelProcessing
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type": "metric",
+              "properties": {
+                "metrics": [
+                  ["AWS/Lambda", "Invocations", "FunctionName", "${FunctionNameEspeciales}"],
+                  [".", "Errors", ".", "."],
+                  [".", "Duration", ".", "."],
+                  [".", "Throttles", ".", "."]
+                ],
+                "period": 300,
+                "stat": "Sum",
+                "region": "${AWS::Region}",
+                "title": "${FunctionNameEspeciales}"
+              }
+            },
+            {
+              "type": "metric",
+              "properties": {
+                "metrics": [
+                  ["AWS/Lambda", "Invocations", "FunctionName", "${FunctionNameEstandar}"],
+                  [".", "Errors", ".", "."],
+                  [".", "Duration", ".", "."],
+                  [".", "Throttles", ".", "."]
+                ],
+                "period": 300,
+                "stat": "Sum",
+                "region": "${AWS::Region}",
+                "title": "${FunctionNameEstandar}"
+              }
+            }
+          ]
+        }
+
+Outputs:
+  EspecialesFunctionArn:
+    Description: ARN of the Especiales Lambda function
+    Value:
+      Fn::GetAtt:
+        - SheetEspecialesFunction
+        - Arn
+  EspecialesFunctionName:
+    Description: Name of the Especiales Lambda function
+    Value:
+      Ref: SheetEspecialesFunction
+
+  EstandarFunctionArn:
+    Description: ARN of the Estandar Lambda function
+    Value:
+      Fn::GetAtt:
+        - SheetEstandarFunction
+        - Arn
+  EstandarFunctionName:
+    Description: Name of the Estandar Lambda function
+    Value:
+      Ref: SheetEstandarFunction
+
+  BucketName:
+    Description: Name of the S3 bucket used for Excel file processing
+    Value:
+      Ref: BucketName
+
+  DashboardURL:
+    Description: URL of the CloudWatch Dashboard
+    Value: !Sub https://${AWS::Region}.console.aws.amazon.com/cloudwatch/home?region=${AWS::Region}#dashboards:name=${AWS::StackName}-ExcelProcessing
