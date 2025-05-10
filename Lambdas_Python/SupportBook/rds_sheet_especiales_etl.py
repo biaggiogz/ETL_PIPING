@@ -218,8 +218,8 @@ def transformationsETL(df):
 
     df = df[df['noline'].notna()]
 
-    df2 = df.rename(columns={'date': 'date_sps_1', 'date_1': 'date_sps_2', 'noline':'e3did'})
-
+    # df2 = df.rename(columns={'date': 'date_sps_1', 'date_1': 'date_sps_2', 'noline':'e3did'})
+    df2 = df.rename(columns={'noline':'e3did'})
     df2['record'] = df2.groupby(['e3did']).cumcount() + 1
     return df2
 

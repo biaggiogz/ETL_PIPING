@@ -209,18 +209,20 @@ def format_value(val):
 
 def transformationsETL(df):
 
-    excluded_prefixes = {"A-1", "R-1", "D-1", "I-1", "K-1", "S-1", "R-8", "UXX", "ANU"}
-    df = df[~df['tp_vt'].str[:3].isin(excluded_prefixes)].copy()
-    df = df[~df['tp_vt'].isin(["_?","ANULADA"])]
+    # excluded_prefixes = {"A-1", "R-1", "D-1", "I-1", "K-1", "S-1", "R-8", "UXX", "ANU"}
+    # df = df[~df['tp_vt'].str[:3].isin(excluded_prefixes)].copy()
+    # df = df[~df['tp_vt'].isin(["_?","ANULADA"])]
     df = df[df['isometricosifc3'].notna()]
     df = df.rename(columns={'isometricosifc3': 'e3did'})
-    select_columns = [
-        'e3did','tp_vt','subsystem', 'comm_crono', 'system'
-    ]
-    df = df[select_columns].copy()
-    df = df.drop_duplicates(subset='e3did', keep='first')
+    # select_columns = [
+    #     'e3did','tp_vt','subsystem', 'comm_crono', 'system'
+    # ]
+    # df = df[select_columns].copy()
+    logger.info(f"{df.columns}")
+    df = df.drop_duplicates(subset=['e3did','tp_vt'], keep='first')
 
     df['e3did'] = '/'+ df['e3did'].astype(str)
+    df['sheet'] = 'ISOS'
 
     return df
 

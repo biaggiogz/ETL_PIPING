@@ -229,7 +229,7 @@ def assign_provider(val):
         return val
 
 def transformationsETL(df):
-    # df['rw'] = df.groupby(['E3DID', 'SUPPORTID', 'SUPPORTMARKALL']).cumcount() + 1
+
 
     df = df[df['e3did'].notna()]
 
@@ -237,13 +237,21 @@ def transformationsETL(df):
     df['nmrev'] = df['nmrevold'].apply(assign_provider)
     df['supportid'] = df['supportid'].apply(clean_supportid)
 
+
     select_columns = [
         'nmrev','e3did', 'supportid', 'estadodefabricacionnuevoformato',
-        'fecha', 'fecha2', 'montaje'
+        'fecha', 'fecha2', 'montaje','test_pack_asociado'
     ]
+
+    df['test_pack_asociado'] = (df['test_pack_asociado'].str.replace('- X-', '-').str.replace('- X', '').str.replace('X- ', '') \
+                                .str.replace('- ANULADA','').str.replace('ANULADA- ','')) \
+                                .str.replace(' ','')
 
     df_light = df[select_columns].copy()
     group_keys = ['e3did', 'supportid']
+
+
+
 
 
     df_light['is_installed'] = (df_light['fecha2'].notna()) & (df_light['montaje'] == 1)
@@ -256,6 +264,7 @@ def transformationsETL(df):
     recieved_flags = df_light.groupby(group_keys)['is_recieved'].transform('all')
     df_light['recieved'] = recieved_flags.map({True: 'recieved', False: 'not recieved'})
     df_light['record'] = df_light.groupby(['e3did']).cumcount() + 1
+    df_light['rwsupportid'] = df_light.groupby(['e3did', 'supportid']).cumcount() + 1
 
 
 # def create_hash(row):

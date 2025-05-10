@@ -1,0 +1,23 @@
+aws ecr get-login-password | docker login --username AWS --password-stdin %AWS_ACCOUNT%.dkr.ecr.%AWS_REGION%.amazonaws.com
+
+set v=01
+set name=spark-arm64
+
+docker tag %name%:%v% %AWS_ACCOUNT%.dkr.ecr.%AWS_REGION%.amazonaws.com/lambda-rds:v%v%-%name%
+docker push %AWS_ACCOUNT%.dkr.ecr.%AWS_REGION%.amazonaws.com/lambda-rds:v%v%-%name%
+
+docker build -f DockerfileLambda_MasterTable -t "%name%:%v%" --provenance=false ./
+
+curl -X POST "http://localhost:9000/2015-03-31/functions/function/invocations" -H "Content-Type: application/json" --data-binary @event.json
+
+
+export v=0.1
+export name=spark-arm64
+export AWS_ACCOUNT=881490115226
+export AWS_REGION=us-east-1
+
+docker tag ${name}:${v} ${AWS_ACCOUNT}.dkr.ecr.${AWS_REGION}.amazonaws.com/spark-serverless:v${v}-${name}
+docker push ${AWS_ACCOUNT}.dkr.ecr.${AWS_REGION}.amazonaws.com/spark-serverless:v${v}-${name}
+
+docker build -f DockerfileSpark -t "${name}:${v}" --platform linux/arm64 --provenance=false ./
+

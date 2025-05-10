@@ -17,4 +17,4 @@ RUN pip install --upgrade pip && \
 # Handler configuration
 COPY rds_sheet_especiales_etl.py ${LAMBDA_TASK_ROOT}
 COPY rds_sheet_estandar_etl.py ${LAMBDA_TASK_ROOT}
-#CMD ["rds_sheet_estandar_etl.lambda_handler"]
+#CMD ["rds_sheet_especiales_etl.lambda_handler"]

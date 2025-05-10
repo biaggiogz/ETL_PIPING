@@ -36,7 +36,9 @@ Parameters:
   BucketName:
     Type: String
     Description: Name of the S3 bucket
-  NameTable:
+  NameTableMetrics:
+    Type: String
+  NameTableMaster:
     Type: String
   SuccessSNSTopic:
     Type: String
@@ -53,6 +55,8 @@ Parameters:
   EspecialesColumns:
     Type: String
   ISOColumns:
+    Type: String
+  WeldingInfoColumns:
     Type: String
 Resources:
 
@@ -176,7 +180,8 @@ Resources:
           DBNAME: !Ref DBNAME
           DESTINATION_BUCKETNAME: !Ref BucketName
           SECRET_NAME: !Ref SecretName
-          NAME_TABLE: !Ref NameTable
+          NAME_TABLE_MASTER: !Ref NameTableMaster
+          NAME_TABLE_METRICS: !Ref NameTableMetrics
           SUCCESS_SNS_TOPIC_ARN: !Ref SuccessSNSTopic
           FAILURE_SNS_TOPIC_ARN: !Ref FailureSNSTopic
           SCHEMA_NAME: !Ref SchemaName
@@ -185,6 +190,7 @@ Resources:
           DAP_COLUMNS: !Ref DAPColumns
           ESPECIALES_COLUMNS: !Ref EspecialesColumns
           ISO_COLUMNS: !Ref ISOColumns
+          WELDING_INFO_COLUMNS: !Ref WeldingInfoColumns
 
   EventSourceMappingSupport:
     Type: AWS::Lambda::EventSourceMapping

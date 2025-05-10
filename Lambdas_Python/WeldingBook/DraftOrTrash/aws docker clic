@@ -1,9 +1,9 @@
 aws ecr get-login-password | docker login --username AWS --password-stdin %AWS_ACCOUNT%.dkr.ecr.%AWS_REGION%.amazonaws.com
 
-set v=06
+set v=v07
 set name=lambda-rds-wb-x86_64
 
-docker tag %name%:%v% %AWS_ACCOUNT%.dkr.ecr.%AWS_REGION%.amazonaws.com/lambda-rds:v%v%-%name%
+docker tag %name%:%v% %AWS_ACCOUNT%.dkr.ecr.%AWS_REGION%.amazonaws.com/lambda-rds:%v%-%name%
 docker push %AWS_ACCOUNT%.dkr.ecr.%AWS_REGION%.amazonaws.com/lambda-rds:v%v%-%name%
 
 docker build -f DockerfileLambda_RDS_WB -t "%name%:%v%" --provenance=false ./

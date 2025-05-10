@@ -41,6 +41,16 @@ def create_spark_session():
         .getOrCreate()
     return spark
 
+def create_spark_session():
+    spark = SparkSession.builder \
+        .appName("LambdaSparkSession") \
+        .master("local[2]") \
+        .config("spark.ui.enabled", "false") \
+        .config("spark.driver.memory", "1g") \
+        .config("spark.executor.memory", "1g") \
+        .getOrCreate()
+    return spark
+
 def lambda_handler(event, context):
     try:
         logger.info("Lambda handler started...")
@@ -52,7 +62,7 @@ def lambda_handler(event, context):
         logger.info(f"SparkSession started in {spark_end - spark_start:.2f} seconds")
 
         df_start = time.time()
-        # Generate 1 million rows using Spark's range
+
         df = spark.range(1_000_000).withColumn("name", concat(lit("User_"), col("id"))) \
             .withColumn("age", (col("id") % 100) + 1) \
             .select("name", "age")

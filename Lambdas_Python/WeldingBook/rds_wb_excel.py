@@ -243,6 +243,21 @@ def transformationsETL(df):
     df = df.copy()
     df['spool'] = df['spool'].replace('-', np.nan)
 
+
+    df['e3did_pre'] = '/' + df[['area', 'dn', 'line_fluid', 'id_line','ins_trac_tren']].applymap(format_value).agg('-'.join, axis=1)
+
+    result = df.loc[df['specification'].isnull(), 'e3did_pre']
+    mask = df['e3did_pre'].isin(result) & df['specification'].notnull()
+    lookup_dict = df.loc[mask].drop_duplicates('e3did_pre').set_index('e3did_pre')['specification']
+
+    df['specification'] = df['e3did_pre'].map(lookup_dict).fillna(df['specification'])
+
+    df['specification'] = df.apply(
+        lambda row: lookup_dict[row['e3did_pre']] if pd.isnull(row['specification']) and row['e3did_pre'] in lookup_dict else row['specification'],
+        axis=1
+    )
+
+
     df['e3did'] = '/' + df[['area', 'dn', 'line_fluid', 'id_line', 'specification', 'ins_trac_tren']].applymap(format_value).agg('-'.join, axis=1)
     df['record'] = df.groupby(['e3did']).cumcount() + 1
     df['line_id'] = df['line_fluid'].astype(str) + '-' + df['id_line'].astype(int).astype(str)
@@ -268,6 +283,7 @@ def transformationsETL(df):
 
     df['spool'] = df['spool'].apply(lambda x: x if pd.isna(x) or len(str(x)) <= 4 else None)
 
+    df.drop(['e3did_pre'], axis=1, inplace=True)
 
     return df
 
