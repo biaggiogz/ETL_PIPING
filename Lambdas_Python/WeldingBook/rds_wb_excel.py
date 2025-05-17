@@ -282,8 +282,12 @@ def transformationsETL(df):
     df['unidades_existentes'] = df['area'].apply(assign_unidades).astype(object)
 
     df['spool'] = df['spool'].apply(lambda x: x if pd.isna(x) or len(str(x)) <= 4 else None)
-
+    df['fw_sw'] = df['fw_sw'].astype(str).str.upper()
     df.drop(['e3did_pre'], axis=1, inplace=True)
+
+
+
+
 
     return df
 

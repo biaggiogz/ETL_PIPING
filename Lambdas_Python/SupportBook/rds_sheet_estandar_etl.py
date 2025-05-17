@@ -17,6 +17,7 @@ import awswrangler as wr
 from functools import lru_cache
 from psycopg2 import sql
 from botocore.exceptions import ClientError
+import re
 from datetime import datetime
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.filterwarnings("ignore", category=FutureWarning)
@@ -214,6 +215,11 @@ def format_value(val):
     return str(val)
 
 def clean_supportid(val):
+
+    # df['supportid'] = df['supportid'].apply(
+    #     lambda x: x if x.startswith('/SPS') else re.sub(r'_.*', '', x)
+    # )
+    #
     if pd.isnull(val):
         return None
     if val.startswith("/SPS-"):
@@ -251,9 +257,6 @@ def transformationsETL(df):
     group_keys = ['e3did', 'supportid']
 
 
-
-
-
     df_light['is_installed'] = (df_light['fecha2'].notna()) & (df_light['montaje'] == 1)
 
     installed_flags = df_light.groupby(group_keys)['is_installed'].transform('all')
@@ -263,6 +266,7 @@ def transformationsETL(df):
     df_light['is_recieved'] = (df_light['fecha'].notna()) & (df_light['estadodefabricacionnuevoformato'] == 'ENTREGA')
     recieved_flags = df_light.groupby(group_keys)['is_recieved'].transform('all')
     df_light['recieved'] = recieved_flags.map({True: 'recieved', False: 'not recieved'})
+
     df_light['record'] = df_light.groupby(['e3did']).cumcount() + 1
     df_light['rwsupportid'] = df_light.groupby(['e3did', 'supportid']).cumcount() + 1
 
