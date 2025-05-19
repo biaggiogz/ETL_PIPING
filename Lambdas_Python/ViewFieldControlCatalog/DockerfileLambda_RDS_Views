@@ -1,0 +1,19 @@
+FROM public.ecr.aws/lambda/python:3.9.2025.03.11.15
+
+RUN yum update -y && \
+    yum -y install wget unzip java-17-amazon-corretto-headless && \
+    yum clean all
+
+# Install dumb-init for proper process management
+RUN wget -O /usr/local/bin/dumb-init https://github.com/Yelp/dumb-init/releases/download/v1.2.5/dumb-init_1.2.5_x86_64 && \
+    chmod +x /usr/local/bin/dumb-init
+
+# Python dependencies
+COPY requirements.txt .
+RUN pip install --upgrade pip && \
+    pip install -r requirements.txt
+
+
+# Handler configuration
+COPY rds_view_field_control.py ${LAMBDA_TASK_ROOT}
+CMD ["rds_view_field_control.lambda_handler"]

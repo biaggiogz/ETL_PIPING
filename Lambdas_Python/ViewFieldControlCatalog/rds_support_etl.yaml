@@ -1,0 +1,303 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: 'AWS::Serverless-2016-10-31'
+Metadata:
+  'AWS::ServerlessRepo::Application':
+    Name: !Ref ApplicationName
+    Labels: !Ref ApplicationLabels
+    SemanticVersion: !Ref SemanticVersion
+Parameters:
+  ApplicationName:
+    Type: String
+    Default: rds-excel-support
+  ApplicationLabels:
+    Type: CommaDelimitedList
+    Default: piping,lambda,rds-support-etl
+  SemanticVersion:
+    Type: String
+    Default: 1.2.0
+  ImageUri:
+    Description: 'Mandatory: ECR Uri for the image. If not present, then create and push using the sam-imagebuilder.yaml in the github https://github.com/aws-samples/spark-on-aws-lambda '
+    Type: String
+    Default: ''
+  LambdaTimeout:
+    Description: 'Optional: Maximum Lambda invocation runtime in seconds. (min 1 - 900 max)'
+    Default: 900
+    Type: Number
+    MinValue: 1
+    MaxValue: 900
+  LambdaMemory:
+    Description: 'Optional: Lambda memory in MB (min 128 - 10,240 max).'
+    Default: 3008
+    Type: Number
+    MinValue: 128
+    MaxValue: 10240
+  LambdaNameEstandar:
+    Description: 'Optional: Override the default Lambda function name.'
+    Type: String
+    Default: 'lambda-rds-py-sheet-estandar-x86-64'
+  LambdaNameEspeciales:
+    Description: 'Optional: Override the default Lambda function name.'
+    Type: String
+    Default: 'lambda-rds-py-sheet-especiales-x86-64'
+  ENDPOINT:
+    Type: String
+  DBNAME:
+    Type: String
+    Default: 'piping'
+  REGION:
+    Type: String
+    Default: 'us-east-1'
+  SecretName:
+    Type: String
+    Default: 'rdspiping'
+  BucketName:
+    Type: String
+    Description: Name of the S3 bucket
+    Default: 'control-piping-2025'
+  SuccessSNSTopic:
+    Type: String
+  FailureSNSTopic:
+    Type: String
+  SourceNameEstandar:
+    Type: String
+    Default: 'estandar'
+  SourceNameEspeciales:
+    Type: String
+    Default: 'especiales'
+  SchemaName:
+    Type: String
+    Default: 'user_01'
+  ColumnsToMasterEstandar:
+    Type: String
+  ColumnsToMasterEspeciales:
+    Type: String
+  S3FolderSheetEstandarDestination:
+    Type: String
+  S3FolderSheetEspecialesDestination:
+    Type: String
+  NameTableEspeciales:
+    Type: String
+    Default: 'sps'
+  NameTableSupport:
+    Type: String
+    Default: 'support'
+  QueueVisibilityTimeout:
+    Type: Number
+    Default: 30
+    Description: SQS Queue visibility timeout in seconds
+  QueueRetentionPeriod:
+    Type: Number
+    Default: 7200
+    Description: SQS Queue message retention period in seconds
+  DBPort:
+    Type: Number
+    Default: 5432
+    Description: Database port number
+  LambdaArchitecture:
+    Type: String
+    Default: x86_64
+    AllowedValues:
+      - x86_64
+      - arm64
+
+Resources:
+  LambdaExecutionRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+        - 'arn:aws:iam::aws:policy/service-role/AWSLambdaSQSQueueExecutionRole'
+      Policies:
+        - PolicyName: 'ECRAccess'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                Resource:
+                  Fn::Sub:
+                    - "arn:aws:ecr:${Region}:${Account}:repository/${RepositoryName}"
+                    - Region: !Select [3, !Split [".", !Ref ImageUri ]]
+                      Account: !Select [0, !Split [".", !Ref ImageUri ]]
+                      RepositoryName: !Select [1, !Split ["/", !Select [ 0, !Split [":", !Select [5, !Split [".", !Ref ImageUri ]]]]]]
+        - PolicyName: 'S3Access'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: 'Allow'
+                Action:
+                  - 's3:*'
+                Resource:
+                  - !Sub 'arn:aws:s3:::${BucketName}/${S3FolderSheetEstandarDestination}*'
+                  - !Sub 'arn:aws:s3:::${BucketName}/${S3FolderSheetEspecialesDestination}*'
+        - PolicyName: 'RDSAccess'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: 'Allow'
+                Action:
+                  - 'rds-db:*'
+                Resource: !Sub 'arn:aws:rds:${AWS::Region}:${AWS::AccountId}:db:${DBNAME}'
+        - PolicyName: cloudwatch
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: 'Allow'
+                Action:
+                  - 'logs:CreateLogGroup'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${AWS::StackName}:*'
+        - PolicyName: 'SecretsAccess'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: 'Allow'
+                Action:
+                  - 'secretsmanager:GetSecretValue'
+                  - 'secretsmanager:DescribeSecret'
+                Resource: !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:rdspiping-*'
+        - PolicyName: 'SNSAccess'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: 'Allow'
+                Action:
+                  - 'sns:Publish'
+                Resource:
+                  - !Sub 'arn:aws:sns:${AWS::Region}:${AWS::AccountId}:SuccessFullSupportBook'
+                  - !Sub 'arn:aws:sns:${AWS::Region}:${AWS::AccountId}:FailureSupportBook'
+        - PolicyName: 'SQSAccess'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: 'Allow'
+                Action:
+                  - 'sqs:SendMessage'
+                  - 'sqs:GetQueueAttributes'
+                Resource: !GetAtt MyQueue.Arn
+
+  LambdaFunctionEstandar:
+    Type: AWS::Serverless::Function
+    Properties:
+      PackageType: Image
+      FunctionName: !Ref LambdaNameEstandar
+      ImageUri: !Ref ImageUri
+      ImageConfig:
+        Command:
+          - "rds_sheet_estandar_etl.lambda_handler"
+      Timeout: !Ref LambdaTimeout
+      MemorySize: !Ref LambdaMemory
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Architectures:
+        - !Ref LambdaArchitecture
+      Environment:
+        Variables:
+          ENDPOINT: !Ref ENDPOINT
+          PORT: !Ref DBPort
+          REGION: !Ref REGION
+          DBNAME: !Ref DBNAME
+          DESTINATION_BUCKETNAME: !Ref BucketName
+          SECRET_NAME: !Ref SecretName
+          NAME_TABLE: !Ref NameTableSupport
+          SUCCESS_SNS_TOPIC_ARN: !Ref SuccessSNSTopic
+          FAILURE_SNS_TOPIC_ARN: !Ref FailureSNSTopic
+          SQS_QUEUE_URL : !Ref MyQueue
+          SOURCE_NAME: !Ref SourceNameEstandar
+          SCHEMA_NAME: !Ref SchemaName
+          COLUMNS_TO_MASTER: !Ref ColumnsToMasterEstandar
+
+  LambdaFunctionEspeciales:
+    Type: AWS::Serverless::Function
+    Properties:
+      PackageType: Image
+      FunctionName: !Ref LambdaNameEspeciales
+      ImageUri: !Ref ImageUri
+      ImageConfig:
+        Command:
+          - "rds_sheet_especiales_etl.lambda_handler"
+      Timeout: !Ref LambdaTimeout
+      MemorySize: !Ref LambdaMemory
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Architectures:
+        - !Ref LambdaArchitecture
+      Environment:
+        Variables:
+          ENDPOINT: !Ref ENDPOINT
+          PORT: !Ref DBPort
+          REGION: !Ref REGION
+          DBNAME: !Ref DBNAME
+          DESTINATION_BUCKETNAME: !Ref BucketName
+          SECRET_NAME: !Ref SecretName
+          NAME_TABLE: !Ref NameTableEspeciales
+          SUCCESS_SNS_TOPIC_ARN: !Ref SuccessSNSTopic
+          FAILURE_SNS_TOPIC_ARN: !Ref FailureSNSTopic
+          SQS_QUEUE_URL : !Ref MyQueue
+          SOURCE_NAME: !Ref SourceNameEspeciales
+          SCHEMA_NAME: !Ref SchemaName
+          COLUMNS_TO_MASTER: !Ref ColumnsToMasterEspeciales
+
+  MyQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub 'queue-${AWS::StackName}'
+      VisibilityTimeout: !Ref QueueVisibilityTimeout
+      MessageRetentionPeriod: !Ref QueueRetentionPeriod
+      SqsManagedSseEnabled: true
+
+  QueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref MyQueue
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !GetAtt LambdaExecutionRole.Arn
+            Action:
+              - sqs:SendMessage
+              - sqs:GetQueueAttributes
+            Resource: !GetAtt MyQueue.Arn
+
+Outputs:
+  LambdaFunctionEstandarArn:
+    Description: Lambda Function ARN
+    Value: !GetAtt LambdaFunctionEstandar.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-LambdaFunctionEstandarArn"
+
+  LambdaFunctionEspecialesArn:
+    Description: Lambda Function ARN
+    Value: !GetAtt LambdaFunctionEspeciales.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-LambdaFunctionEspecialesArn"
+
+  QueueURL:
+    Description: URL of the created SQS queue
+    Value: !Ref MyQueue
+    Export:
+      Name: "QUEUEURL-SUPPORT"
+
+  QueueARN:
+    Description: ARN of the created SQS queue
+    Value: !GetAtt MyQueue.Arn
+    Export:
+      Name: "QUEUE-SUPPORT-ARN"

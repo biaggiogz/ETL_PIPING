@@ -1,0 +1,216 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Excel file processor Lambda function
+
+Globals:
+  Function:
+    LoggingConfig:
+      LogFormat: JSON
+    Tags:
+      Application: ExcelProcessor
+      Environment: !Ref AWS::StackName
+
+Parameters:
+  BucketName:
+    Type: String
+    Description: Name of the S3 bucket to monitor
+
+  Runtime:
+    Type: String
+    Default: java17
+
+  Timeout:
+    Type: Number
+    Default: 60
+
+  MemorySize:
+    Type: Number
+    Default: 1024
+
+  Architecture:
+    Type: String
+    Default: x86_64
+
+  JavaOpts:
+    Type: String
+    Default: -XX:+TieredCompilation -XX:TieredStopAtLevel=1
+
+  FunctionNameTP:
+    Type: String
+    Default: lambda-sheet-tp-x86-64
+
+  FunctionNameISOS:
+    Type: String
+    Default: lambda-sheet-isos-x86-64
+
+  HandlerTP:
+    Type: String
+    Default: logicExcel.AppSheetTP::handleRequest
+
+  HandlerISOS:
+    Type: String
+    Default: logicExcel.App::handleRequest
+
+  SheetNameTP:
+    Type: String
+    Default: TP
+
+  SheetNameISOS:
+    Type: String
+    Default: ISOS
+
+  FolderDestinationPathTP:
+    Type: String
+    Default: wb_tp_precom_master/destination/sheet/tp/
+
+  FolderDestinationPathISOS:
+    Type: String
+    Default: wb_tp_precom_master/destination/sheet/isos/
+
+  SkipRowTP:
+    Type: String
+    Default: '3'
+
+  SkipRowISOS:
+    Type: String
+    Default: '1'
+
+  ColumnsToInsideTrimTP:
+    Type: String
+    Default: DOSSIER_ID
+
+  ColumnsToInsideTrimISOS:
+    Type: String
+    Default: DESIGN AREA,ISOMETRICOS IFC3,TP/VT,CAT,TP CAT,TP UNIT,SUBSYSTEM
+
+  FolderSourcePath:
+    Type: String
+    Description: Folder path to monitor for Excel files
+
+  AccountID:
+    Type: String
+    Description: Account ID of the destination S3 bucket
+
+Resources:
+  LambdaLogGroupISOS:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${FunctionNameISOS}'
+      RetentionInDays: 5
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+
+  LambdaLogGroupTP:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${FunctionNameTP}'
+      RetentionInDays: 5
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+
+  ExcelSheetISOS:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Ref FunctionNameISOS
+      CodeUri: .
+      Handler: !Ref HandlerISOS
+      Runtime: !Ref Runtime
+      Timeout: !Ref Timeout
+      MemorySize: !Ref MemorySize
+      Architectures:
+        - !Ref Architecture
+      Policies:
+        - S3FullAccessPolicy:
+            BucketName: !Ref BucketName
+        - Statement:
+            - Effect: Allow
+              Action:
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+                - logs:DeleteLogGroup
+              Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${AWS::StackName}-*
+      Environment:
+        Variables:
+          SHEET_NAME: !Ref SheetNameISOS
+          BUCKET_NAME: !Ref BucketName
+          FOLDER_SOURCE_PATH: !Ref FolderSourcePath
+          FOLDER_DESTINATION_PATH: !Ref FolderDestinationPathISOS
+          JAVA_TOOL_OPTIONS: !Ref JavaOpts
+          SKIP_ROW: !Ref SkipRowISOS
+          EXPECTED_ACCOUNT_ID: !Ref AccountID
+          COLUMNS_TO_INSIDE_TRIM: !Ref ColumnsToInsideTrimISOS
+
+  ExcelSheetTP:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Ref FunctionNameTP
+      CodeUri: .
+      Handler: !Ref HandlerTP
+      Runtime: !Ref Runtime
+      Timeout: !Ref Timeout
+      MemorySize: !Ref MemorySize
+      Architectures:
+        - !Ref Architecture
+      Policies:
+        - S3FullAccessPolicy:
+            BucketName: !Ref BucketName
+        - Statement:
+            - Effect: Allow
+              Action:
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+                - logs:DeleteLogGroup
+              Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${AWS::StackName}-*
+      Environment:
+        Variables:
+          SHEET_NAME: !Ref SheetNameTP
+          BUCKET_NAME: !Ref BucketName
+          FOLDER_SOURCE_PATH: !Ref FolderSourcePath
+          FOLDER_DESTINATION_PATH: !Ref FolderDestinationPathTP
+          JAVA_TOOL_OPTIONS: !Ref JavaOpts
+          SKIP_ROW: !Ref SkipRowTP
+          EXPECTED_ACCOUNT_ID: !Ref AccountID
+          COLUMNS_TO_INSIDE_TRIM: !Ref ColumnsToInsideTrimTP
+
+  LambdaInvokePermissionISOS:
+    Type: AWS::Lambda::Permission
+    DependsOn:
+      - ExcelSheetISOS
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref ExcelSheetISOS
+      Principal: s3.amazonaws.com
+      SourceArn: !Sub arn:aws:s3:::${BucketName}
+
+  LambdaInvokePermissionTP:
+    Type: AWS::Lambda::Permission
+    DependsOn:
+      - ExcelSheetTP
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref ExcelSheetTP
+      Principal: s3.amazonaws.com
+      SourceArn: !Sub arn:aws:s3:::${BucketName}
+
+Outputs:
+  FunctionArnISOS:
+    Description: ARN of the ISOS Lambda function
+    Value: !GetAtt ExcelSheetISOS.Arn
+
+  FunctionArnTP:
+    Description: ARN of the TP Lambda function
+    Value: !GetAtt ExcelSheetTP.Arn
+
+  FunctionNameISOS:
+    Description: Name of the ISOS Lambda function
+    Value: !Ref ExcelSheetISOS
+
+  FunctionNameTP:
+    Description: Name of the TP Lambda function
+    Value: !Ref ExcelSheetTP
+
+  BucketName:
+    Description: Name of the S3 bucket
+    Value: !Ref BucketName

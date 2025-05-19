@@ -1,0 +1,197 @@
+AWSTemplateFormatVersion: "2010-09-09" 
+Description: SSM Parameter Store configuration for Project X
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - staging
+      - prod
+    Description: Environment name for the parameters
+
+  ProjectName:
+    Type: String
+    Default: piping-2025
+    Description: Name of the project for parameter hierarchy
+
+  DatabaseConfig:
+    Type: String
+    Default: >
+      {
+        "endpoint": "dbpiping.c2puwo8gwzah.us-east-1.rds.amazonaws.com",
+        "port": "5432",
+        "region": "us-east-1",
+        "schema": "user_01"
+      }
+    Description: JSON configuration for database parameters
+
+  TopicConfig:
+    Type: String
+    Default: >
+      {
+        "success": [
+          "arn:aws:sns:us-east-1:881490115226:SuccessFullMasterTable",
+          "arn:aws:sns:us-east-1:881490115226:SuccessFullSupportBook",
+          "arn:aws:sns:us-east-1:881490115226:SuccessfullWBTPBook",
+          "arn:aws:sns:us-east-1:881490115226:SuccessFullWeldingBook"
+        ],
+        "error": [
+          "arn:aws:sns:us-east-1:881490115226:FailureFullMasterTable", 
+          "arn:aws:sns:us-east-1:881490115226:FailureSupportBook",
+          "arn:aws:sns:us-east-1:881490115226:FailureWBTPBook",
+          "arn:aws:sns:us-east-1:881490115226:FailureWeldingBook"
+        ]
+      }
+    Description: JSON configuration for SNS topics
+
+Resources:
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${ProjectName}-parameter-role-${Environment}
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: SSMParameterAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssm:PutParameter
+                  - ssm:GetParameter
+                  - ssm:DeleteParameter
+                  - ssm:AddTagsToResource
+                  - ssm:GetParametersByPath
+                Resource: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/*'
+
+  SSMParameterFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub lambda-ssm-parameters-${Environment}
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Runtime: python3.9
+      Timeout: 300
+      Code:
+        ZipFile: |
+          import boto3
+          import cfnresponse
+          import json
+          
+          def handler(event, context):
+              try:
+                  ssm = boto3.client('ssm')
+                  env = event['ResourceProperties']['Environment']
+                  project_name = event['ResourceProperties']['ProjectName']
+          
+                  if event['RequestType'] in ['Create', 'Update']:
+                      # Process database config
+                      db_config = json.loads(event['ResourceProperties']['DatabaseConfig'])
+                      for key, value in db_config.items():
+                          param_name = f'/{project_name}/{env}/database/{key}'
+                          try:
+                              ssm.put_parameter(
+                                  Name=param_name,
+                                  Value=str(value),
+                                  Type='String',
+                                  Tags=[
+                                      {'Key': 'Environment', 'Value': env},
+                                      {'Key': 'Project', 'Value': project_name}
+                                  ]
+                              )
+                          except ssm.exceptions.ParameterAlreadyExists:
+                              # Update parameter value
+                              ssm.put_parameter(
+                                  Name=param_name,
+                                  Value=str(value),
+                                  Type='String',
+                                  Overwrite=True
+                              )
+                              # Update tags separately
+                              ssm.add_tags_to_resource(
+                                  ResourceType='Parameter',
+                                  ResourceId=param_name,
+                                  Tags=[
+                                      {'Key': 'Environment', 'Value': env},
+                                      {'Key': 'Project', 'Value': project_name}
+                                  ]
+                              )
+          
+                      # Process topic config
+                      topic_config = json.loads(event['ResourceProperties']['TopicConfig'])
+                      for topic_type, arns in topic_config.items():
+                          for i, arn in enumerate(arns, 1):
+                              param_name = f'/{project_name}/{env}/{topic_type.upper()}_SNS_TOPIC_ARN_{i}'
+                              try:
+                                  ssm.put_parameter(
+                                      Name=param_name,
+                                      Value=arn,
+                                      Type='String',
+                                      Tags=[
+                                          {'Key': 'Environment', 'Value': env},
+                                          {'Key': 'Project', 'Value': project_name},
+                                          {'Key': 'TopicType', 'Value': topic_type}
+                                      ]
+                                  )
+                              except ssm.exceptions.ParameterAlreadyExists:
+                                  # Update parameter value
+                                  ssm.put_parameter(
+                                      Name=param_name,
+                                      Value=arn,
+                                      Type='String',
+                                      Overwrite=True
+                                  )
+                                  # Update tags separately
+                                  ssm.add_tags_to_resource(
+                                      ResourceType='Parameter',
+                                      ResourceId=param_name,
+                                      Tags=[
+                                          {'Key': 'Environment', 'Value': env},
+                                          {'Key': 'Project', 'Value': project_name},
+                                          {'Key': 'TopicType', 'Value': topic_type}
+                                      ]
+                                  )
+          
+                  elif event['RequestType'] == 'Delete':
+                      # Clean up parameters on stack deletion
+                      paginator = ssm.get_paginator('get_parameters_by_path')
+                      base_path = f'/{project_name}/{env}'
+          
+                      for page in paginator.paginate(Path=base_path):
+                          for param in page['Parameters']:
+                              ssm.delete_parameter(Name=param['Name'])
+          
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {
+                      'Message': f'Successfully processed parameters for {project_name} in {env}'
+                  })
+          
+              except Exception as e:
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {
+                      'Error': str(e)
+                  })
+  CreateSSMParameters:
+    Type: Custom::SSMParameters
+    Properties:
+      ServiceToken: !GetAtt SSMParameterFunction.Arn
+      Environment: !Ref Environment
+      ProjectName: !Ref ProjectName
+      DatabaseConfig: !Ref DatabaseConfig
+      TopicConfig: !Ref TopicConfig
+
+Outputs:
+  ParameterPath:
+    Description: Base path for all parameters
+    Value: !Sub "/${ProjectName}/${Environment}"
+  ParameterCount:
+    Description: Number of parameters created
+    Value: !Sub "Database parameters: 4, Topic parameters: 8"

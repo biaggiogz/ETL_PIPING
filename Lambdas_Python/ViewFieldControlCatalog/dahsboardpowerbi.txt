@@ -1,0 +1,65 @@
+
+
+- Date Range Selector
+- Product Category Filter
+- Brand Filter
+- Store Location (if multiple)
+- Season/Holiday Period
+
+
+- Date Range Selector
+- Product Category Filter
+- Brand Filter
+- Store Location (if multiple)
+- Season/Holiday Period
+
+[Top Left]                          [Top Right]
+Sales Trend Chart                   Top 10 Best-Selling Products
+(Line chart showing                 (Bar chart showing quantities
+daily/weekly sales)                 and revenue)
+
+[Middle Left]                       [Middle Right]
+Category Performance                Inventory Status
+(Donut chart showing sales          (Heat map or status indicators
+by candy category)                  for stock levels)
+
+[Bottom Left]                       [Bottom Right]
+Peak Hours Analysis                 Product Margin Analysis
+(Heat map showing busiest           (Scatter plot showing sales
+hours/days)                         vs. profit margin)
+
+
++------------------------------------------------------------------+
+|                        CANDY STORE DASHBOARD                        |
++------------------------------------------------------------------+
+| [Filters Bar]                                                      |
+| Date Range: [    ] Category: [    ] Brand: [    ] Season: [    ]  |
++------------------------------------------------------------------+
+
++-------------------------+            +-------------------------+
+|   Daily Sales Overview  |            |    Top Selling Candy    |
+| Revenue: $XXX          |            | [Bar Chart]             |
+| Transactions: XXX      |            | - By Units              |
+| Avg Basket Size: $XX   |            | - By Revenue            |
++-------------------------+            +-------------------------+
+
++-------------------------+            +-------------------------+
+|    Sales Trend          |            |  Category Performance   |
+| [Line Chart]            |            | [Donut Chart]          |
+| - Daily/Weekly Sales    |            | - Chocolate            |
+| - Target vs Actual      |            | - Gummy                |
+|                        |            | - Hard Candy           |
++-------------------------+            +-------------------------+
+
++-------------------------+            +-------------------------+
+| Inventory Status        |            |  Seasonal Performance  |
+| [Heat Map]              |            | [Column Chart]         |
+| - Low Stock Alerts      |            | - Holiday Sales        |
+| - Expiring Items        |            | - Special Events       |
++-------------------------+            +-------------------------+
+
+Key Metrics (Cards):
+- Profit Margin %
+- Best Selling Time of Day
+- Customer Traffic
+- Stock Turnover Rate

@@ -1,0 +1,85 @@
+import org.apache.poi.xssf.usermodel.*;
+import org.apache.poi.ss.usermodel.*;
+
+public class ExcelWithFormattedHeaders {
+    public static void main(String[] args) {
+        try {
+            XSSFWorkbook workbook = new XSSFWorkbook();
+            XSSFSheet sheet = workbook.createSheet("Formatted Sheet");
+
+            // Create header row
+            Row headerRow = sheet.createRow(0);
+
+            // Create cell style for headers
+            XSSFCellStyle headerStyle = workbook.createCellStyle();
+
+            // Set background color
+            headerStyle.setFillForegroundColor(IndexedColors.LIGHT_BLUE.getIndex());
+            headerStyle.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+
+            // Set font
+            XSSFFont headerFont = workbook.createFont();
+            headerFont.setBold(true);
+            headerFont.setColor(IndexedColors.WHITE.getIndex());
+            headerStyle.setFont(headerFont);
+
+            // Add borders
+            headerStyle.setBorderBottom(BorderStyle.THIN);
+            headerStyle.setBorderTop(BorderStyle.THIN);
+            headerStyle.setBorderLeft(BorderStyle.THIN);
+            headerStyle.setBorderRight(BorderStyle.THIN);
+
+            // Create header cells with style
+            String[] headers = {"ID", "Name", "Email", "Department"};
+            for (int i = 0; i < headers.length; i++) {
+                Cell cell = headerRow.createCell(i);
+                cell.setCellValue(headers[i]);
+                cell.setCellStyle(headerStyle);
+
+                // Auto-size the column
+                sheet.autoSizeColumn(i);
+            }
+
+            // Add some sample data
+            Row dataRow = sheet.createRow(1);
+            dataRow.createCell(0).setCellValue("1001");
+            dataRow.createCell(1).setCellValue("John Doe");
+            dataRow.createCell(2).setCellValue("john@example.com");
+            dataRow.createCell(3).setCellValue("IT");
+
+            // Write to file
+            FileOutputStream out = new FileOutputStream("FormattedExcel.xlsx");
+            workbook.write(out);
+            out.close();
+            workbook.close();
+
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+}
+// Additional styling options
+XSSFCellStyle style = workbook.createCellStyle();
+
+// Alignment
+style.setAlignment(HorizontalAlignment.CENTER);
+style.setVerticalAlignment(VerticalAlignment.CENTER);
+
+// Text wrapping
+style.setWrapText(true);
+
+// Different border styles
+style.setBorderTop(BorderStyle.THICK);
+style.setTopBorderColor(IndexedColors.BLACK.getIndex());
+
+// Different background colors
+style.setFillForegroundColor(IndexedColors.YELLOW.getIndex());
+style.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+
+// Font customization
+XSSFFont font = workbook.createFont();
+font.setFontHeightInPoints((short) 12);
+font.setFontName("Arial");
+font.setItalic(true);
+style.setFont(font);
+
