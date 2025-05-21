@@ -21,7 +21,7 @@ spark = SparkSession.builder \
     .config("spark.sql.autoBroadcastJoinThreshold", "10m") \
     .config("spark.memory.offHeap.enabled", "true") \
     .config("spark.memory.offHeap.size", "128m") \
-    .config("spark.driver.extraJavaOptions", "-XX:+UseSerialGC -XX:+UseCompressedOops") \
+    .config("spark.driver.extraJavaOptions", "-XX:+UseG1GC -XX:+UseCompressedOops") \
     .getOrCreate()
 
 # Initialize some common operations to cache classes

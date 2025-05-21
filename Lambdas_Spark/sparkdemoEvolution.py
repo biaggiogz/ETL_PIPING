@@ -29,17 +29,14 @@ spark = SparkSession.builder \
     .appName("TestLambdaSparkSession") \
     .master("local[2]") \
     .config("spark.ui.enabled", "false") \
-    .config("spark.driver.memory", "2g") \
-    .config("spark.executor.memory", "2g") \
+    .config("spark.driver.memory", "1g") \
+    .config("spark.executor.memory", "1g") \
     .config("spark.sql.shuffle.partitions", "2") \
     .config("spark.default.parallelism", "2") \
     .config("spark.sql.autoBroadcastJoinThreshold", "10m") \
     .config("spark.memory.offHeap.enabled", "true") \
     .config("spark.memory.offHeap.size", "128m") \
-    .config("spark.driver.extraJavaOptions", "-XX:+UseSerialGC -XX:+UseCompressedOops") \
-    .config("spark.default.parallelism", str(os.cpu_count() * 2)) \
-    .config("spark.sql.shuffle.partitions", str(os.cpu_count() * 2)) \
-    .config("spark.memory.fraction", "0.8") \
+    .config("spark.driver.extraJavaOptions", "-XX:+UseG1GC -XX:+UseCompressedOops") \
     .getOrCreate()
 
 def lambda_handler(event, context):
@@ -49,7 +46,7 @@ def lambda_handler(event, context):
         global spark
         df_start = time.time()
 
-        df = spark.range(100_000_000).withColumn("name", concat(lit("User_"), col("id"))) \
+        df = spark.range(1_000_000_000).withColumn("name", concat(lit("User_"), col("id"))) \
             .withColumn("age", (col("id") % 100) + 1) \
             .select("name", "age")
 
