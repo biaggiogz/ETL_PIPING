@@ -56,7 +56,7 @@ RUN chmod +x /tmp/downloadjars.sh && \
 # Update Spark memory configurations
 RUN echo "spark.driver.memory 2g" >> $SPARK_HOME/conf/spark-defaults.conf && \
     echo "spark.executor.memory 2g" >> $SPARK_HOME/conf/spark-defaults.conf && \
-    echo "spark.driver.extraJavaOptions -XX:+UseG1GC -XX:+UseCompressedOops -XX:MaxRAM=2g" >> $SPARK_HOME/conf/spark-defaults.conf && \
+    echo "spark.driver.extraJavaOptions -XX:+UseSerialGC -XX:+UseCompressedOops -XX:MaxRAM=2g" >> $SPARK_HOME/conf/spark-defaults.conf && \
     echo "spark.memory.offHeap.enabled true" >> $SPARK_HOME/conf/spark-defaults.conf && \
     echo "spark.memory.offHeap.size 128m" >> $SPARK_HOME/conf/spark-defaults.conf && \
     echo "log4j.logger.org.apache.spark=OFF" > $SPARK_HOME/conf/log4j.properties
