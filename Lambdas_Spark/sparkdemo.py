@@ -41,16 +41,6 @@ def create_spark_session():
         .getOrCreate()
     return spark
 
-def create_spark_session():
-    spark = SparkSession.builder \
-        .appName("LambdaSparkSession") \
-        .master("local[2]") \
-        .config("spark.ui.enabled", "false") \
-        .config("spark.driver.memory", "1g") \
-        .config("spark.executor.memory", "1g") \
-        .getOrCreate()
-    return spark
-
 def lambda_handler(event, context):
     try:
         logger.info("Lambda handler started...")

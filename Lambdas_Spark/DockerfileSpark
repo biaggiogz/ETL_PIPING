@@ -72,5 +72,7 @@ RUN echo "JAVA_HOME: $JAVA_HOME" && \
 
 
 # Handler configuration
-COPY sparkdemo.py ${LAMBDA_TASK_ROOT}
-CMD ["sparkdemo.lambda_handler"]
+#COPY sparkdemo.py ${LAMBDA_TASK_ROOT}
+#CMD ["sparkdemo.lambda_handler"]
+COPY sparkdemoEvolution.py ${LAMBDA_TASK_ROOT}
+CMD ["sparkdemoEvolution.lambda_handler"]

@@ -77,4 +77,3 @@ RUN python /tmp/spark-init-Evolution.py
 # Handler configuration
 COPY sparkdemoEvolution.py ${LAMBDA_TASK_ROOT}
 CMD ["sparkdemoEvolution.lambda_handler"]
-
