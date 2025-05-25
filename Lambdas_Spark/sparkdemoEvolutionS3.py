@@ -9,7 +9,7 @@ import time
 import random
 from pyspark.sql.functions import col, concat, lit , rand, when, sha2, explode, array
 from pyspark.sql import Row
-
+import multiprocessing
 def check_dependencies(spark):
     logger.info("Checking Spark dependencies...")
 
@@ -44,15 +44,16 @@ def setup_logger(name: str = None) -> logging.Logger:
 logger = setup_logger(__name__)
 
 s3_client = boto3.client('s3')
+cpu_count = multiprocessing.cpu_count()
 
 # Initialize Spark session at module level to avoid cold starts
 spark = SparkSession.builder \
     .appName("TestLambdaSparkSession") \
-    .master("local[2]") \
+    .master(f"local[{cpu_count}]") \
     .config("spark.ui.enabled", "false") \
     .config("spark.driver.memory", "1g") \
     .config("spark.executor.memory", "1g") \
-    .config("spark.sql.shuffle.partitions", "8") \
+    .config("spark.sql.shuffle.partitions", "40") \
     .config("spark.default.parallelism", "4") \
     .config("spark.sql.autoBroadcastJoinThreshold", "10m") \
     .config("spark.memory.offHeap.enabled", "true") \
@@ -71,6 +72,7 @@ spark = SparkSession.builder \
     .config("spark.hadoop.fs.s3a.fast.upload", "true") \
     .config("spark.hadoop.fs.s3a.readahead.range", "256K") \
     .config("spark.hadoop.fs.s3a.input.fadvise", "random") \
+    .config("spark.sql.execution.arrow.pyspark.enabled", "true") \
     .getOrCreate()
 
 
@@ -86,14 +88,18 @@ def lambda_handler(event, context):
 
         for start in range(0, 1_000_000_000, chunk_size):
             end = start + chunk_size
-            chunk_df = (spark.range(start, end)
-                        .withColumn("age", (col("id") % 100) + 1)
-                        .withColumn("income", (col("id") * rand()).cast("double"))
-                        .withColumn("country", when((col("id") % 10) < 5, "US").otherwise("UK"))
-                        .withColumn("is_active", (col("id") % 2 == 0))
-                        .withColumn("name", concat(lit("User_"), col("id"))) )
+            chunk_df = spark.range(start, end).withColumn("rand_val", rand()).selectExpr(
+                "id",
+                "id % 100 + 1 as age",
+                "cast(id * rand_val as double) as income",
+                "case when id % 10 < 5 then 'US' else 'UK' end as country",
+                "id % 2 == 0 as is_active",
+                "concat('User_', id) as name"
+            )
 
-            chunk_df.coalesce(10).write.mode("append").parquet(output_path)
+
+            chunk_df.write.option("compression", "snappy").mode("append").parquet(output_path)
+
 
 
 
@@ -102,7 +108,7 @@ def lambda_handler(event, context):
 
         return {
             'statusCode': 200,
-            'body': json.dumps(f'SparkSession {final_counts}-row DataFrame created successfully')
+            'body': json.dumps(f'SparkSession DataFrame created successfully')
         }
 
     except Exception as e:
