@@ -81,52 +81,21 @@ def lambda_handler(event, context):
         global spark
         df_start = time.time()
         # check_dependencies(spark)
-        dfs = []
-
-
-        chunk_size = 100_000_000
-        num_chunks = 1_000_000_000 // chunk_size
-        final_counts = {}
-
-        for start in range(0, num_chunks, chunk_size):
-            end = start + chunk_size
-            # Build DataFrame for this chunk
-            chunk_df = (spark.range(start, end)
-                .withColumn("age", (col("id") % 100) + 1)
-                .withColumn("income", (col("id") * rand()).cast("double"))
-                .withColumn("country", when((col("id") % 10) < 5, "US").otherwise("UK"))
-                .withColumn("is_active", (col("id") % 2 == 0))
-                .withColumn("name", concat(lit("User_"), col("id"))) )
-
-            dfs.append(chunk_df)
-
-            # Optional: save each chunk to Parquet on S3
-            # output_path = "s3a://control-piping-2025/SPARK/"
-            # chunk_df.write.mode("overwrite").parquet(output_path)
-            # logger.info(f"Chunk {i + 1} written to {output_path}")
-
-            # Group by 'age' and count within this chunk
-            # chunk_counts = chunk_df.groupBy("age").count().collect()
-            #
-            # # Combine results into final_counts dictionary
-            # for row in chunk_counts:
-            #     age = row['age']
-            #     count = row['count']
-            #     final_counts[age] = final_counts.get(age, 0) + count
-
-
-
-
-        # Convert the final_counts dict to a Spark DataFrame
-        # result_rows = [Row(age=k, count=v) for k, v in final_counts.items()]
-        # result_df = spark.createDataFrame(result_rows)
-        full_df = dfs[0]
-        for df in dfs[1:]:
-            full_df = full_df.union(df)
-                    # Write aggregated result to S3 in Parquet format
         output_path = "s3a://control-piping-2025/SPARK/"
-        full_df.coalesce(1).write.mode("overwrite").parquet(output_path)
-        logger.info(f"Final aggregated counts written to {output_path}")
+        chunk_size = 100_000_000
+
+        for start in range(0, 1_000_000_000, chunk_size):
+            end = start + chunk_size
+            chunk_df = (spark.range(start, end)
+                        .withColumn("age", (col("id") % 100) + 1)
+                        .withColumn("income", (col("id") * rand()).cast("double"))
+                        .withColumn("country", when((col("id") % 10) < 5, "US").otherwise("UK"))
+                        .withColumn("is_active", (col("id") % 2 == 0))
+                        .withColumn("name", concat(lit("User_"), col("id"))) )
+
+            chunk_df.coalesce(10).write.mode("append").parquet(output_path)
+
+
 
         overall_end = time.time()
         logger.info(f"Overall Lambda execution time: {overall_end - overall_start:.2f} seconds")
