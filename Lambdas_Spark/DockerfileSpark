@@ -28,7 +28,9 @@ RUN pip install --upgrade pip && \
     pip install pyspark==$PYSPARK_VERSION boto3 && \
     pip install -r requirements.txt
 
-
+# Download AWS Hadoop dependencies
+RUN wget https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/${HADOOP_VERSION}/hadoop-aws-${HADOOP_VERSION}.jar -P $SPARK_HOME/jars/ && \
+    wget https://repo1.maven.org/maven2/com/amazonaws/aws-java-sdk-bundle/${AWS_SDK_VERSION}/aws-java-sdk-bundle-${AWS_SDK_VERSION}.jar -P $SPARK_HOME/jars/
 
 # Spark configuration
 ENV SPARK_HOME="/var/lang/lib/python3.9/site-packages/pyspark"
@@ -57,7 +59,9 @@ RUN echo "spark.driver.memory 1g" >> $SPARK_HOME/conf/spark-defaults.conf && \
     echo "spark.executor.memory 1g" >> $SPARK_HOME/conf/spark-defaults.conf && \
     echo "spark.driver.extraJavaOptions -XX:+UseG1GC -XX:+UseCompressedOops -XX:MaxRAM=832m" >> $SPARK_HOME/conf/spark-defaults.conf && \
     echo "spark.memory.offHeap.enabled true" >> $SPARK_HOME/conf/spark-defaults.conf && \
-    echo "spark.memory.offHeap.size 128m" >> $SPARK_HOME/conf/spark-defaults.conf
+    echo "spark.memory.offHeap.size 128m" >> $SPARK_HOME/conf/spark-defaults.conf && \
+    echo "spark.hadoop.fs.s3a.impl org.apache.hadoop.fs.s3a.S3AFileSystem" >> $SPARK_HOME/conf/spark-defaults.conf && \
+    echo "spark.hadoop.fs.s3a.aws.credentials.provider com.amazonaws.auth.DefaultAWSCredentialsProviderChain" >> $SPARK_HOME/conf/spark-defaults.conf
 
 
 COPY spark-class.sh $SPARK_HOME/bin/
@@ -74,5 +78,5 @@ RUN echo "JAVA_HOME: $JAVA_HOME" && \
 # Handler configuration
 #COPY sparkdemo.py ${LAMBDA_TASK_ROOT}
 #CMD ["sparkdemo.lambda_handler"]
-COPY sparkdemoEvolution.py ${LAMBDA_TASK_ROOT}
-CMD ["sparkdemoEvolution.lambda_handler"]
+COPY sparkdemoEvolutionS3.py ${LAMBDA_TASK_ROOT}
+CMD ["sparkdemoEvolutionS3.lambda_handler"]

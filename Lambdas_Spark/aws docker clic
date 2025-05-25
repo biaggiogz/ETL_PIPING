@@ -11,9 +11,9 @@ docker build -f DockerfileLambda_MasterTable -t "%name%:%v%" --provenance=false 
 
 curl -X POST "http://localhost:9000/2015-03-31/functions/function/invocations" -H "Content-Type: application/json" --data-binary @event.json
 
-docker run -e AWS_LAMBDA_FUNCTION_MEMORY_SIZE=8000 -it -d --platform linux/arm64 -p 9000:8080 --name spark-e spark-arm64-evolution:03
+docker run -it -d --platform linux/arm64 -p 9000:8080 --env-file .env --name spark-e ${name}:${v}
 
-export v=0.1
+export v=22
 export name=spark-arm64
 export AWS_ACCOUNT=881490115226
 export AWS_REGION=us-east-1
@@ -21,7 +21,10 @@ export AWS_REGION=us-east-1
 docker tag ${name}:${v} ${AWS_ACCOUNT}.dkr.ecr.${AWS_REGION}.amazonaws.com/spark-serverless:v${v}-${name}
 docker push ${AWS_ACCOUNT}.dkr.ecr.${AWS_REGION}.amazonaws.com/spark-serverless:v${v}-${name}
 
-set v=05
+set v=20
 set name=spark-arm64-evolution
 docker build -f DockerfileSpark -t "${name}:${v}" --platform linux/arm64 --provenance=false ./
+
+aws ecr get-login-password | docker login --username AWS --password-stdin ${AWS_ACCOUNT}.dkr.ecr.${AWS_REGION}.amazonaws.com
+
 

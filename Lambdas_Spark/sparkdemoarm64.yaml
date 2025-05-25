@@ -79,8 +79,12 @@ Resources:
                 Action:
                   - 's3:*'
                 Resource:
-                  - !Sub 'arn:aws:s3:::${BucketName}/support/destination/*'
-                  - !Sub 'arn:aws:s3:::${BucketName}/support/processed/*'
+                  - !Sub 'arn:aws:s3:::${BucketName}/SPARK/*'
+              - Effect: 'Allow'
+                Action:
+                  - 's3:ListBucket'
+                Resource:
+                  - !Sub 'arn:aws:s3:::${BucketName}'
         - PolicyName: 'RDSAccess'
           PolicyDocument:
             Version: '2012-10-17'

@@ -8,6 +8,27 @@ from pyspark.sql import SparkSession
 import time
 import random
 from pyspark.sql.functions import col, concat, lit , rand, when, sha2, explode, array
+from pyspark.sql import Row
+
+def check_dependencies(spark):
+    logger.info("Checking Spark dependencies...")
+
+    # Check required JARs (class presence)
+    required_classes = [
+        "org.apache.hadoop.fs.s3a.S3AFileSystem",
+        "com.amazonaws.services.s3.AmazonS3Client",
+    ]
+
+    for cls in required_classes:
+        try:
+            spark._jvm.Thread.currentThread().getContextClassLoader().loadClass(cls)
+            logger.info(f"✓ Class found: {cls}")
+        except Exception as e:
+            logger.error(f"✗ Missing class: {cls} -> {e}")
+            raise ImportError(f"Required class not found in classpath: {cls}")
+
+    logger.info("All required classes are available.")
+
 
 # Logger
 def setup_logger(name: str = None) -> logging.Logger:
@@ -38,7 +59,20 @@ spark = SparkSession.builder \
     .config("spark.memory.offHeap.size", "128m") \
     .config("spark.driver.extraJavaOptions", "-XX:+UseG1GC -XX:+UseCompressedOops") \
     .config("spark.driver.extraJavaOptions", "-XX:MaxMetaspaceSize=512m") \
+    .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem") \
+    .config("spark.hadoop.fs.s3a.endpoint", "s3.amazonaws.com") \
+    .config("spark.hadoop.fs.s3a.aws.credentials.provider", "com.amazonaws.auth.DefaultAWSCredentialsProviderChain") \
+    .config("spark.hadoop.fs.s3a.fast.upload", "true") \
+    .config("spark.hadoop.fs.s3a.multipart.size", "104857600") \
+    .config("spark.sql.parquet.compression.codec", "snappy") \
+    .config("spark.hadoop.fs.s3a.connection.timeout", "1200000") \
+    .config("spark.hadoop.fs.s3a.path.style.access", "true") \
+    .config("spark.hadoop.fs.s3a.connection.maximum", "200") \
+    .config("spark.hadoop.fs.s3a.fast.upload", "true") \
+    .config("spark.hadoop.fs.s3a.readahead.range", "256K") \
+    .config("spark.hadoop.fs.s3a.input.fadvise", "random") \
     .getOrCreate()
+
 
 def lambda_handler(event, context):
     try:
@@ -46,17 +80,10 @@ def lambda_handler(event, context):
         overall_start = time.time()
         global spark
         df_start = time.time()
+        # check_dependencies(spark)
+        dfs = []
 
-        # df = (spark.range(1_000_000_000)
-        #     .withColumn("name", concat(lit("User_"), col("id"))) \
-        #     .withColumn("age", (col("id") % 100) + 1) \
-        #     .withColumn("income", (col("id") * rand()).cast("double")) \
-        #     .withColumn("country", when((col("id") % 10) < 5, "US").otherwise("UK")) \
-        #     .withColumn("is_active", (col("id") % 2 == 0)))
-        # count = df.count()
-        # logger.info(f"schema dfspark: {df.printSchema()}")
-        # result = df.groupBy("country").count()
-        # logger.info(f"result group by country: {result}")
+
         chunk_size = 100_000_000
         num_chunks = 1_000_000_000 // chunk_size
         final_counts = {}
@@ -71,44 +98,35 @@ def lambda_handler(event, context):
                 .withColumn("is_active", (col("id") % 2 == 0))
                 .withColumn("name", concat(lit("User_"), col("id"))) )
 
+            dfs.append(chunk_df)
+
+            # Optional: save each chunk to Parquet on S3
+            # output_path = "s3a://control-piping-2025/SPARK/"
+            # chunk_df.write.mode("overwrite").parquet(output_path)
+            # logger.info(f"Chunk {i + 1} written to {output_path}")
+
             # Group by 'age' and count within this chunk
-            chunk_counts = chunk_df.groupBy("age").count().collect()
+            # chunk_counts = chunk_df.groupBy("age").count().collect()
+            #
+            # # Combine results into final_counts dictionary
+            # for row in chunk_counts:
+            #     age = row['age']
+            #     count = row['count']
+            #     final_counts[age] = final_counts.get(age, 0) + count
 
-            # Combine results into final_counts dictionary
-            for row in chunk_counts:
-                age = row['age']
-                count = row['count']
-                final_counts[age] = final_counts.get(age, 0) + count
 
-        #
-        # count = df.count()
-        # logger.info(f"DataFrame created with {count} rows")
-        # df_end = time.time()
-        # logger.info(f"DataFrame created and counted in {df_end - df_start:.2f} seconds")
-        #
-        # logger.info("Starting DataFrame operations in chunks...")
-        # agg_start = time.time()
-        #
-        # chunk_size = 1000000
-        # num_chunks = (count + chunk_size - 1) // chunk_size
-        #
-        # # Process each chunk
-        # for i in range(num_chunks):
-        #     start_id = i * chunk_size
-        #     end_id = min((i + 1) * chunk_size, count)
-        #
-        #     chunk_df = df.filter((col("id") >= start_id) & (col("id") < end_id))
-        #     if i == 0:
-        #         agg_df = chunk_df.groupBy("name").count()
-        #     else:
-        #         chunk_agg = chunk_df.groupBy("name").count()
-        #         agg_df = agg_df.union(chunk_agg)
-        #
-        # # Get final aggregated count
-        # countagg = agg_df.count()
-        # agg_end = time.time()
-        # logger.info(f"DataFrame agg  in {agg_start - agg_end:.2f} seconds and countagg:  {countagg}")
 
+
+        # Convert the final_counts dict to a Spark DataFrame
+        # result_rows = [Row(age=k, count=v) for k, v in final_counts.items()]
+        # result_df = spark.createDataFrame(result_rows)
+        full_df = dfs[0]
+        for df in dfs[1:]:
+            full_df = full_df.union(df)
+                    # Write aggregated result to S3 in Parquet format
+        output_path = "s3a://control-piping-2025/SPARK/"
+        full_df.coalesce(1).write.mode("overwrite").parquet(output_path)
+        logger.info(f"Final aggregated counts written to {output_path}")
 
         overall_end = time.time()
         logger.info(f"Overall Lambda execution time: {overall_end - overall_start:.2f} seconds")
