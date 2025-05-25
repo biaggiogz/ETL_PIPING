@@ -28,9 +28,6 @@ RUN pip install --upgrade pip && \
     pip install pyspark==$PYSPARK_VERSION boto3 && \
     pip install -r requirements.txt
 
-# Download AWS Hadoop dependencies
-RUN wget https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/${HADOOP_VERSION}/hadoop-aws-${HADOOP_VERSION}.jar -P $SPARK_HOME/jars/ && \
-    wget https://repo1.maven.org/maven2/com/amazonaws/aws-java-sdk-bundle/${AWS_SDK_VERSION}/aws-java-sdk-bundle-${AWS_SDK_VERSION}.jar -P $SPARK_HOME/jars/
 
 # Spark configuration
 ENV SPARK_HOME="/var/lang/lib/python3.9/site-packages/pyspark"
@@ -42,6 +39,13 @@ ENV SPARK_LOCAL_IP=127.0.0.1
 # Create necessary directories
 RUN mkdir -p $SPARK_HOME/jars && \
     mkdir -p $SPARK_HOME/conf
+
+## Download AWS Hadoop dependencies
+#RUN wget https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/${HADOOP_VERSION}/hadoop-aws-${HADOOP_VERSION}.jar -P $SPARK_HOME/jars/ && \
+#    wget https://repo1.maven.org/maven2/com/amazonaws/aws-java-sdk-bundle/${AWS_SDK_VERSION}/aws-java-sdk-bundle-${AWS_SDK_VERSION}.jar -P $SPARK_HOME/jars/ && \
+#    wget https://repo1.maven.org/maven2/org/apache/spark/spark-hadoop-cloud_2.12/${PYSPARK_VERSION}/spark-hadoop-cloud_2.12-3.3.0.jar -P $SPARK_HOME/jars/
+#
+
 
 # Custom JAR downloads
 COPY downloadjars.sh /tmp/

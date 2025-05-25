@@ -53,7 +53,7 @@ spark = SparkSession.builder \
     .config("spark.ui.enabled", "false") \
     .config("spark.driver.memory", "1g") \
     .config("spark.executor.memory", "2g") \
-    .config("spark.sql.shuffle.partitions", "20") \
+    .config("spark.sql.shuffle.partitions", "10") \
     .config("spark.default.parallelism", "4") \
     .config("spark.sql.autoBroadcastJoinThreshold", "10m") \
     .config("spark.memory.offHeap.enabled", "true") \
@@ -69,7 +69,6 @@ spark = SparkSession.builder \
     .config("spark.hadoop.fs.s3a.connection.timeout", "1200000") \
     .config("spark.hadoop.fs.s3a.path.style.access", "true") \
     .config("spark.hadoop.fs.s3a.connection.maximum", "200") \
-    .config("spark.hadoop.fs.s3a.fast.upload", "true") \
     .config("spark.hadoop.fs.s3a.readahead.range", "256K") \
     .config("spark.hadoop.fs.s3a.input.fadvise", "random") \
     .config("spark.sql.execution.arrow.pyspark.enabled", "true") \
@@ -90,10 +89,10 @@ def lambda_handler(event, context):
         global spark
         df_start = time.time()
         # check_dependencies(spark)
-        output_path = "s3a://control-piping-2025/SPARK/"
-        chunk_size = 100_000_000
+        output_path = "s3a://control-piping-2025/SPARKLIGHT/"
+        chunk_size = 10_000_000
 
-        for start in range(0, 1_000_000_000, chunk_size):
+        for start in range(0, 100_000_000, chunk_size):
             end = start + chunk_size
             chunk_df = spark.range(start, end).withColumn("rand_val", rand()).selectExpr(
                 "id",

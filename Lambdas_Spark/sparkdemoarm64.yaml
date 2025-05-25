@@ -78,8 +78,19 @@ Resources:
               - Effect: 'Allow'
                 Action:
                   - 's3:*'
+                  - 's3:ListBucketMultipartUploads'
+                  - 's3:AbortMultipartUpload'
+                  - 's3:ListMultipartUploadParts'
                 Resource:
                   - !Sub 'arn:aws:s3:::${BucketName}/SPARK/*'
+              - Effect: 'Allow'
+                Action:
+                  - 's3:*'
+                  - 's3:ListBucketMultipartUploads'
+                  - 's3:AbortMultipartUpload'
+                  - 's3:ListMultipartUploadParts'
+                Resource:
+                  - !Sub 'arn:aws:s3:::${BucketName}/SPARKLIGHT/*'
               - Effect: 'Allow'
                 Action:
                   - 's3:ListBucket'
