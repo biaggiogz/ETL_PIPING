@@ -105,7 +105,7 @@ def lambda_handler(event, context):
             )
 
 
-            chunk_df.write.option("compression", "snappy").mode("append").parquet(output_path)
+            chunk_df.coalesce(20).write.option("compression", "snappy").mode("append").parquet(output_path)
 
 
 
