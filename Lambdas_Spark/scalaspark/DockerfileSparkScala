@@ -1,0 +1,78 @@
+FROM public.ecr.aws/lambda/java:17
+
+ARG HADOOP_VERSION=3.3.1
+ARG AWS_SDK_VERSION=1.12.262
+ARG SPARK_VERSION=3.3.2
+ARG SCALA_VERSION=2.12
+
+# Install system dependencies with pinned versions
+RUN yum update -y && \
+    yum -y install wget tar gzip unzip java-17-amazon-corretto-headless && \
+    yum clean all
+
+# Install dumb-init for proper process management
+RUN ARCH=$(uname -m) && \
+    if [ "$ARCH" = "aarch64" ]; then \
+      wget -O /usr/local/bin/dumb-init https://github.com/Yelp/dumb-init/releases/download/v1.2.5/dumb-init_1.2.5_aarch64; \
+    else \
+      wget -O /usr/local/bin/dumb-init https://github.com/Yelp/dumb-init/releases/download/v1.2.5/dumb-init_1.2.5_x86_64; \
+    fi && \
+    chmod +x /usr/local/bin/dumb-init
+
+# Java environment configuration
+ENV JAVA_HOME=/usr/lib/jvm/java-17-amazon-corretto
+ENV PATH="$JAVA_HOME/bin:$PATH"
+
+# Download and install Spark with Scala
+RUN wget https://archive.apache.org/dist/spark/spark-${SPARK_VERSION}/spark-${SPARK_VERSION}-bin-hadoop3.tgz && \
+    tar -xzf spark-${SPARK_VERSION}-bin-hadoop3.tgz && \
+    mv spark-${SPARK_VERSION}-bin-hadoop3 /opt/spark && \
+    rm spark-${SPARK_VERSION}-bin-hadoop3.tgz
+
+# Spark configuration
+ENV SPARK_HOME=/opt/spark
+ENV PATH=$PATH:$SPARK_HOME/bin
+ENV SPARK_CONF_DIR=$SPARK_HOME/conf
+ENV SPARK_LOCAL_IP=127.0.0.1
+
+# Create necessary directories
+RUN mkdir -p $SPARK_HOME/jars && \
+    mkdir -p $SPARK_HOME/conf
+
+# Custom JAR downloads
+COPY downloadjars.sh /tmp/
+RUN chmod +x /tmp/downloadjars.sh && \
+    /tmp/downloadjars.sh $SPARK_HOME $HADOOP_VERSION $AWS_SDK_VERSION
+
+# Update Spark memory configurations
+RUN echo "spark.driver.memory 1g" >> $SPARK_HOME/conf/spark-defaults.conf && \
+    echo "spark.executor.memory 1g" >> $SPARK_HOME/conf/spark-defaults.conf && \
+    echo "spark.driver.extraJavaOptions -XX:+UseG1GC -XX:+UseCompressedOops -XX:MaxRAM=832m --add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-exports=java.base/sun.nio.ch=ALL-UNNAMED" >> $SPARK_HOME/conf/spark-defaults.conf && \
+    echo "spark.memory.offHeap.enabled true" >> $SPARK_HOME/conf/spark-defaults.conf && \
+    echo "spark.memory.offHeap.size 128m" >> $SPARK_HOME/conf/spark-defaults.conf && \
+    echo "spark.hadoop.fs.s3a.impl org.apache.hadoop.fs.s3a.S3AFileSystem" >> $SPARK_HOME/conf/spark-defaults.conf && \
+    echo "spark.hadoop.fs.s3a.aws.credentials.provider com.amazonaws.auth.DefaultAWSCredentialsProviderChain" >> $SPARK_HOME/conf/spark-defaults.conf \
+
+COPY spark-class.sh $SPARK_HOME/bin/
+RUN mv $SPARK_HOME/bin/spark-class $SPARK_HOME/bin/spark-class.original && \
+    mv $SPARK_HOME/bin/spark-class.sh $SPARK_HOME/bin/spark-class && \
+    chmod +x $SPARK_HOME/bin/spark-class
+
+RUN echo "JAVA_HOME: $JAVA_HOME" && \
+    ls -la $JAVA_HOME/bin/java && \
+    $JAVA_HOME/bin/java -version
+
+# Copy Scala application jar and dependencies
+COPY target/scala-spark-lambda-1.0.0.jar ${LAMBDA_TASK_ROOT}/lib/
+COPY src/main/scala/com/spark/ScalaSparkHandler.scala ${LAMBDA_TASK_ROOT}
+ENV JAVA_TOOL_OPTIONS="\
+--add-opens=java.base/sun.nio.ch=ALL-UNNAMED \
+--add-opens=java.base/java.nio=ALL-UNNAMED \
+--add-opens=java.base/java.lang=ALL-UNNAMED \
+--add-opens=java.base/java.util=ALL-UNNAMED \
+--add-opens=java.base/java.io=ALL-UNNAMED \
+--add-opens=java.base/sun.security.util=ALL-UNNAMED \
+--add-opens=java.base/sun.net.util=ALL-UNNAMED \
+--add-exports=java.base/sun.nio.ch=ALL-UNNAMED"
+
+CMD ["com.spark.ScalaSparkHandler::handleRequest"]
