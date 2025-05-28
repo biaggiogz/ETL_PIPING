@@ -1,47 +1,39 @@
 # Base image with cargo-chef and cargo-lambda
 FROM ghcr.io/cargo-lambda/cargo-lambda:latest AS chef
 WORKDIR /usr/src/app
-
 RUN cargo install cargo-chef
 
-# Only copy manifest files and prepare the dependency "recipe"
+# Planner stage - generates recipe.json
 FROM chef AS planner
-WORKDIR /usr/src/app
 COPY Cargo.toml Cargo.lock ./
-COPY src/ ./src/
-# dummy.rs or minimal source code is needed to make cargo-chef happy
-COPY dummy.rs .
+# Use a minimal real source file (e.g., empty main.rs) instead of dummy.rs
+COPY src/main.rs ./src/main.rs
 RUN cargo chef prepare --recipe-path recipe.json
 
-# Build and cache dependencies
+# Cacher stage - builds dependencies
 FROM chef AS cacher
-WORKDIR /usr/src/app
 COPY --from=planner /usr/src/app/recipe.json recipe.json
-COPY Cargo.toml Cargo.lock ./
-COPY src/ ./src/
-COPY dummy.rs .
 RUN cargo chef cook --release --recipe-path recipe.json
 
-# Final build with actual code
+# Builder stage - builds the app
 FROM chef AS builder
+WORKDIR /usr/src/app
+# 1. Copy dependencies first
+COPY --from=cacher /usr/src/app/target target
+# 2. Copy project files (Cargo.toml, source code)
+COPY Cargo.toml Cargo.lock ./
+COPY src/ ./src/
+# 3. Build the app (uses cached dependencies)
 ENV PACKAGE=lambda_test
 ENV TARGETPLATFORM=linux/amd64
-WORKDIR /usr/src/app
-COPY . .
-COPY --from=cacher /usr/src/app/target target/
-# Removed copy of .cargo directory since it doesn't exist
-
-# The references to PACKAGE and TARGETPLATFORM are correct.
-# PACKAGE is used in the cargo lambda build command.
-# TARGETPLATFORM is used in the case statement to determine the RUST_ARCH.
 RUN case ${TARGETPLATFORM} in \
-  "linux/amd64") RUST_ARCH=x86_64-unknown-linux-gnu ;; \
-  "linux/arm64") RUST_ARCH=aarch64-unknown-linux-gnu ;; \
-  *) exit 1 ;; \
-  esac \
-  && cargo lambda build --release --target ${RUST_ARCH} --bin $PACKAGE
-# Runtime image
+    "linux/amd64") RUST_ARCH=x86_64-unknown-linux-gnu ;; \
+    "linux/arm64") RUST_ARCH=aarch64-unknown-linux-gnu ;; \
+    *) exit 1 ;; \
+    esac \
+    && cargo lambda build --release --target ${RUST_ARCH} --bin $PACKAGE
 
+# Runtime stage
 FROM public.ecr.aws/lambda/provided:al2023
 ENV PACKAGE=lambda_test
 COPY --from=builder /usr/src/app/target/lambda/$PACKAGE/bootstrap ${LAMBDA_RUNTIME_DIR}/bootstrap
