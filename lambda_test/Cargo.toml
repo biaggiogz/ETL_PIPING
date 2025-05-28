@@ -1,0 +1,28 @@
+[package]
+name = "lambda_test"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+aws_lambda_events = { version = "0.15.1", default-features = false, features = ["s3"] }
+rand = "0.8.5"
+chrono = "0.4"
+aws-config = "1.0.1"
+aws-sdk-s3 = "1.3.0"
+tempfile = "3.8.1"
+aws-types = "1.0.1"
+
+lambda_runtime = "0.13.0"
+tokio = { version = "1", features = ["macros"] }
+polars = { version = "0.35.4", features = [
+    "lazy",           # For lazy evaluation
+    "csv",            # CSV support
+    "parquet",        # Parquet support
+    "json",           # JSON support
+    "strings",        # String operations
+    "dtype-datetime"  # DateTime support
+] }
+
+[[bin]]
+name = "lambda_test"  # This should match the package arg
+path = "src/main.rs"

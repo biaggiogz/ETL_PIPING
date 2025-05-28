@@ -1,0 +1,17 @@
+docker buildx build --platform linux/amd64 --build-arg TARGETPLATFORM=linux/amd64 --build-arg package=test -f Dockerfile -t rust:01 .
+
+
+docker run -it -d -p 9000:8080 --env-file .env --name rust "%name%:%v%"
+
+docker volume create cargocache
+
+
+docker buildx build --platform linux/amd64 --build-arg package=test ^
+  --build-arg TARGETPLATFORM=linux/amd64 ^
+  -f Dockerfile ^
+  -t rust:%v% .
+
+
+
+
+curl -X POST "http://localhost:9000/2015-03-31/functions/function/invocations" -H "Content-Type: application/json" --data-binary @event.json

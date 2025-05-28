@@ -1,0 +1,44 @@
+# Build stage
+FROM ghcr.io/cargo-lambda/cargo-lambda:latest AS builder
+ARG package=lambda_test
+ARG TARGETPLATFORM=linux/amd64
+WORKDIR /usr/src/app
+
+# Copy only Cargo.toml and Cargo.lock first
+COPY Cargo.toml Cargo.lock ./
+
+# Create a dummy main.rs to build dependencies
+RUN mkdir src && \
+    echo "fn main() {}" > src/main.rs && \
+    echo "pub fn handle() {}" > src/event_handler.rs
+
+# Build dependencies only
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    case ${TARGETPLATFORM} in \
+    "linux/amd64") RUST_ARCH=x86_64-unknown-linux-gnu ;; \
+    "linux/arm64") RUST_ARCH=aarch64-unknown-linux-gnu ;; \
+    *) exit 1 ;; \
+    esac && \
+    cargo lambda build --release --target ${RUST_ARCH} --bin $package
+
+
+# Remove the dummy files
+RUN rm -rf src/
+
+# Now copy the real source code
+COPY src/ src/
+
+# Build the final binary
+RUN case ${TARGETPLATFORM} in \
+    "linux/amd64") RUST_ARCH=x86_64-unknown-linux-gnu ;; \
+    "linux/arm64") RUST_ARCH=aarch64-unknown-linux-gnu ;; \
+    *) exit 1 ;; \
+    esac \
+    && cargo lambda build --release --target ${RUST_ARCH} --bin $package
+
+# Runtime stage
+FROM public.ecr.aws/lambda/provided:al2023
+COPY --from=builder /usr/src/app/target/lambda/test/bootstrap ${LAMBDA_RUNTIME_DIR}/bootstrap
+RUN chmod +x ${LAMBDA_RUNTIME_DIR}/bootstrap
+CMD [ "bootstrap" ]
