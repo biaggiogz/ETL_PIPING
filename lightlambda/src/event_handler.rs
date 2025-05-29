@@ -1,0 +1,172 @@
+
+// All necessary dependencies are used and properly declared:
+// lambda_runtime - used for LambdaEvent, Error and tracing
+// aws_lambda_events - used for S3Event
+// polars - used for DataFrame operations and Series
+// rand - used for random number generation with Rng and thread_rng
+// std::time - used for Instant timing
+// aws_sdk_s3 - used for S3 Client
+// tempfile - used for NamedTempFile
+// std::fs - used for File operations
+// aws_config - used for BehaviorVersion and Region
+// std::env - currently imported but not used, can be removed
+
+use lambda_runtime::{tracing, Error, LambdaEvent};
+use aws_lambda_events::event::s3::S3Event;
+use polars::prelude::*;
+use rand::{Rng, thread_rng};
+use std::time::Instant;
+use aws_sdk_s3::Client;
+use tempfile::NamedTempFile;
+use std::fs::File;
+use aws_config::BehaviorVersion;
+use aws_config::Region;
+use std::env;
+
+pub(crate) async fn function_handler(event: LambdaEvent<S3Event>) -> Result<String, Error> {
+    let start_time = Instant::now();
+    tracing::info!("Starting chunked DataFrame generation...");
+
+//     const TOTAL_ROWS: usize = 1_000_000_000; // 1 billion rows
+//     const CHUNK_SIZE: usize = 50_000_000;    // 50 million rows per chunk
+
+    let total_rows: usize = std::env::var("NUM_ROWS")
+        .unwrap_or_else(|_| "1_000_000_000".to_string())
+        .parse()
+        .unwrap_or(1_000_000_000);
+
+    let chunk_size: usize = std::env::var("CHUNK_SIZE")
+        .unwrap_or_else(|_| "50_000_000".to_string())
+        .parse()
+        .unwrap_or(50_000_000);
+
+
+    let mut rng = thread_rng();
+
+    // Initialize S3 client
+    let config = aws_config::defaults(BehaviorVersion::v2023_11_09())
+        .region(Region::new("us-east-1"))
+        .load()
+        .await;
+    let s3_client = Client::new(&config);
+
+
+    for chunk_index in 0..(total_rows / chunk_size) {
+        let start_idx = chunk_index * chunk_size;
+        tracing::info!("Processing chunk {} (rows {} to {})", chunk_index, start_idx, start_idx + chunk_size);
+
+        // Generate data for each column with proper indexing
+        let id_column = Series::new(
+            "id",
+            (start_idx as i32..(start_idx + chunk_size) as i32).collect::<Vec<i32>>()
+        );
+
+        let value_column = Series::new(
+            "value",
+            (0..chunk_size).map(|_| rng.gen::<f64>()).collect::<Vec<f64>>()
+        );
+
+        let category_column = Series::new(
+            "category",
+            (0..chunk_size).map(|_| {
+                match rng.gen_range(0..3) {
+                    0 => "A",
+                    1 => "B",
+                    _ => "C",
+                }
+            }).collect::<Vec<&str>>()
+        );
+
+        let amount_column = Series::new(
+            "amount",
+            (0..chunk_size).map(|_| rng.gen_range(1000..100000)).collect::<Vec<i32>>()
+        );
+
+        let status_column = Series::new(
+            "status",
+            (0..chunk_size).map(|_| rng.gen_bool(0.5)).collect::<Vec<bool>>()
+        );
+
+        let score_column = Series::new(
+            "score",
+            (0..chunk_size).map(|_| rng.gen_range(0.0..100.0)).collect::<Vec<f32>>()
+        );
+
+        let mut df = DataFrame::new(vec![
+            id_column,
+            value_column,
+            category_column,
+            amount_column,
+            status_column,
+            score_column,
+        ])?;
+
+        // Create a temporary file for this chunk
+        let temp_file = NamedTempFile::new()?;
+        let temp_path = temp_file.path();
+        let parquet_path = temp_path.to_str().unwrap();
+        let mut file = File::create(parquet_path)?;
+
+        // Save DataFrame chunk to Parquet format
+        ParquetWriter::new(&mut file)
+            .with_compression(ParquetCompression::Snappy)
+            .with_row_group_size(Some(100000))
+            .finish(&mut df)?;
+
+        // Upload chunk to S3 with unique key
+        let key = format!("RustDf/chunk_{}_rust.parquet", chunk_index);
+        tracing::info!("Uploading chunk {} to S3...", chunk_index);
+
+        let success_message = format!(
+            "DataFrame generated with shape {:?}",
+            df.shape()   // Shape of the DataFrame
+        );
+
+        s3_client
+            .put_object()
+            .bucket("control-piping-2025")
+            .key(&key)
+            .body(aws_sdk_s3::primitives::ByteStream::from_path(temp_path).await?)
+            .send()
+            .await?;
+
+        tracing::info!("Chunk {} processed and uploaded", chunk_index);
+    }
+
+    let generation_time = start_time.elapsed();
+    tracing::info!("All chunks processed and uploaded in {:?}", generation_time);
+
+    // Process S3 event
+    let payload = event.payload;
+    let mut processed_files = 0;
+
+    for record in payload.records {
+        let bucket_name = record.s3.bucket.name.unwrap_or_default();
+        let object_key = record.s3.object.key.unwrap_or_default();
+
+        tracing::info!(
+            "Processing file: {} from bucket: {}",
+            object_key,
+            bucket_name
+        );
+
+        processed_files += 1;
+    }
+
+
+    Ok("Processing completed successfully".to_string())
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lambda_runtime::{Context, LambdaEvent};
+
+    #[tokio::test]
+    async fn test_event_handler() {
+        let event = LambdaEvent::new(S3Event::default(), Context::default());
+        let response = function_handler(event).await.unwrap();
+        assert!(response.contains("Successfully processed"));
+    }
+}
