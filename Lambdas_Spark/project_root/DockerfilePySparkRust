@@ -1,0 +1,85 @@
+### Stage 1: Build Rust Python wheel with maturin
+FROM amazonlinux:2 as builder
+
+ARG PYTHON_VERSION=3.9
+ARG HADOOP_VERSION=3.3.1
+ARG AWS_SDK_VERSION=1.12.262
+ARG PYSPARK_VERSION=3.3.0
+
+# Install system packages
+RUN yum update -y && \
+    yum install -y gcc openssl-devel wget unzip tar \
+    java-17-amazon-corretto-headless python3 python3-pip && \
+    yum clean all
+
+# Set Python and Rust
+RUN python3 -m pip install --upgrade pip && \
+    pip3 install maturin==1.4.0
+
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+# Copy and build Rust wheel
+COPY rust /rust
+WORKDIR /rust
+# Before the maturin build command, ensure Python 3.9 is the active version
+RUN maturin build --release --strip --interpreter python3.9
+
+
+### Stage 2: AWS Lambda Runtime Image
+FROM public.ecr.aws/lambda/python:3.9-x86_64
+
+ARG HADOOP_VERSION=3.3.1
+ARG AWS_SDK_VERSION=1.12.262
+ARG PYSPARK_VERSION=3.3.0
+
+RUN yum update -y && \
+    yum install -y gcc openssl-devel wget unzip tar \
+    java-17-amazon-corretto-headless python3 python3-pip && \
+    yum clean all
+
+# Copy wheel from builder and install it
+COPY --from=builder /rust/target/wheels/data_processor-*.whl .
+RUN pip install data_processor-*.whl && rm data_processor-*.whl
+
+# Install Python and Spark dependencies
+COPY lambda_pyspark/requirements.txt .
+RUN pip install --upgrade pip && \
+    pip install pyspark==$PYSPARK_VERSION boto3 && \
+    pip install -r requirements.txt
+
+# Spark environment config
+ENV SPARK_HOME="/var/lang/lib/python3.9/site-packages/pyspark"
+ENV PATH=$PATH:$SPARK_HOME/bin
+ENV PYTHONPATH=$SPARK_HOME/python:$SPARK_HOME/python/lib/py4j-0.10.9.5-src.zip:$PYTHONPATH
+ENV SPARK_CONF_DIR=$SPARK_HOME/conf
+ENV SPARK_LOCAL_IP=127.0.0.1
+
+# Create Spark dirs and download JARs
+RUN mkdir -p $SPARK_HOME/jars && \
+    mkdir -p $SPARK_HOME/conf
+
+COPY spark_executables/downloadjars.sh /tmp/
+RUN chmod +x /tmp/downloadjars.sh && \
+    /tmp/downloadjars.sh $SPARK_HOME $HADOOP_VERSION $AWS_SDK_VERSION
+
+# Spark memory and S3 configs
+RUN echo "spark.driver.memory 1g" >> $SPARK_HOME/conf/spark-defaults.conf && \
+    echo "spark.executor.memory 1g" >> $SPARK_HOME/conf/spark-defaults.conf && \
+    echo "spark.driver.extraJavaOptions -XX:+UseG1GC -XX:+UseCompressedOops -XX:MaxRAM=832m" >> $SPARK_HOME/conf/spark-defaults.conf && \
+    echo "spark.memory.offHeap.enabled true" >> $SPARK_HOME/conf/spark-defaults.conf && \
+    echo "spark.memory.offHeap.size 128m" >> $SPARK_HOME/conf/spark-defaults.conf && \
+    echo "spark.hadoop.fs.s3a.impl org.apache.hadoop.fs.s3a.S3AFileSystem" >> $SPARK_HOME/conf/spark-defaults.conf && \
+    echo "spark.hadoop.fs.s3a.aws.credentials.provider com.amazonaws.auth.DefaultAWSCredentialsProviderChain" >> $SPARK_HOME/conf/spark-defaults.conf
+
+# Replace spark-class with custom script
+COPY spark_executables/spark-class.sh $SPARK_HOME/bin/
+RUN mv $SPARK_HOME/bin/spark-class $SPARK_HOME/bin/spark-class.original && \
+    mv $SPARK_HOME/bin/spark-class.sh $SPARK_HOME/bin/spark-class && \
+    chmod +x $SPARK_HOME/bin/spark-class
+
+# Copy Lambda function code
+COPY lambda_pyspark/src ${LAMBDA_TASK_ROOT}/src
+COPY lambda_pyspark/lambda_handler.py ${LAMBDA_TASK_ROOT}
+
+CMD ["lambda_handler.lambda_handler"]

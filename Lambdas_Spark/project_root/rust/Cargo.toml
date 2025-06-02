@@ -1,0 +1,21 @@
+[package]
+name = "data_processor"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "data_processor"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.19", features = ["extension-module"] }
+rayon = "1.7"
+
+[package.metadata.maturin]
+python-source = "python"
+# Explicitly specify Python versions we support
+python-versions = ">=3.9"
+
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
