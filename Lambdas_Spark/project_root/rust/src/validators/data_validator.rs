@@ -3,13 +3,18 @@ use pyo3::prelude::*;
 use rayon::prelude::*;
 
 pub fn validate_data(ages: Vec<i32>, incomes: Vec<f64>) -> PyResult<bool> {
-    if ages.par_iter().any(|&age| age < 1 || age > 100) {
+    // Process validation in parallel chunks
+    let chunk_size = 100_000;
+
+    let ages_valid = ages.par_chunks(chunk_size)
+        .all(|chunk| chunk.par_iter().all(|&age| age >= 1 && age <= 100));
+
+    if !ages_valid {
         return Ok(false);
     }
 
-    if incomes.par_iter().any(|&income| income.is_nan()) {
-        return Ok(false);
-    }
+    let incomes_valid = incomes.par_chunks(chunk_size)
+        .all(|chunk| chunk.par_iter().all(|&income| !income.is_nan()));
 
-    Ok(true)
+    Ok(incomes_valid)
 }

@@ -1,3 +1,5 @@
+
+#project_root/lambda_pyspark/lambda_handler.py
 from typing import Dict, Any
 import time
 import logging
@@ -38,7 +40,6 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 .option("compression", "snappy") \
                 .mode("append") \
                 .parquet(f"s3a://pyspark-rust/PySparkRust/")
-
 
             metrics['processed_records'] += chunk_size
             metrics['chunks_processed'] += 1

@@ -15,7 +15,6 @@ pub struct Processed {
     pub country: String,
 }
 
-
 #[pyfunction]
 pub fn process_chunk_wrapper(data: Vec<(i64, f64)>) -> PyResult<Vec<(i64, f64, String)>> {
     process_chunk(data)

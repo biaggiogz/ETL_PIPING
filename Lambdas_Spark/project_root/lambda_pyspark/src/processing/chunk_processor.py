@@ -10,9 +10,15 @@ def process_chunk_with_rust(
         start: int,
         chunk_size: int
 ) -> DataFrame:
-    # Generate basic data
-    raw_data = [(i, np.random.random())
-                for i in range(start, start + chunk_size)]
+    # Generate data in smaller batches
+    batch_size = 100_000
+    raw_data = []
+
+    for batch_start in range(start, start + chunk_size, batch_size):
+        batch_end = min(batch_start + batch_size, start + chunk_size)
+        batch = [(i, np.random.random())
+                 for i in range(batch_start, batch_end)]
+        raw_data.extend(batch)
 
     # Process using Rust
     processed_data = process_data_chunk(raw_data)
