@@ -1,11 +1,10 @@
-#project_root/lambda_pyspark/lambda_handler.py
-
 from typing import Dict, Any
 import time
 import logging
 import multiprocessing
 import boto3
 import numpy as np
+import os
 
 
 from src.spark.session import create_spark_session
@@ -27,34 +26,25 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
     try:
         spark = create_spark_session(cpu_count)
-        chunk_size = 100
+        chunk_size = int(os.environ.get('CHUNK_SIZE', 100))
+        total_rows = int(os.environ.get('TOTAL_ROWS', 1000))
 
-        for start in range(0, 1000, chunk_size):
+        for start in range(0, total_rows, chunk_size):
             chunk_start = time.time()
 
-            # Process chunk using Rust-enhanced function
             chunk_df = process_chunk_with_rust(spark, start, chunk_size)
 
-            # Validate data using Rust
-            # this kill rutime
-            # ages = chunk_df.select("age").toPandas()["age"].values
-            # incomes = chunk_df.select("income").toPandas()["income"].values
-            # if not validate_chunk_data(ages, incomes):
-            #     raise ValueError(f"Data validation failed for chunk {start}")
-
-            # Write to S3 with optimized settings
             chunk_df.write \
                 .option("compression", "snappy") \
                 .mode("append") \
-                .parquet(f"s3a://control-piping-2025/PySparkRust/")
+                .parquet(f"s3a://pyspark-rust/PySparkRust/")
 
-            # Update metrics
+
             metrics['processed_records'] += chunk_size
             metrics['chunks_processed'] += 1
             chunk_time = time.time() - chunk_start
             logger.info(f"Chunk processed in {chunk_time:.2f}s")
 
-            # Check Lambda timeout
             if context.get_remaining_time_in_millis() < 30000:
                 logger.warning("Approaching Lambda timeout")
                 break

@@ -35,8 +35,6 @@ def create_spark_session(cpu_count: int) -> SparkSession:
         .config("spark.hadoop.fs.s3a.directory.marker.retention", "keep") \
         .config("spark.hadoop.fs.s3a.committer.name", "magic") \
         .config("spark.hadoop.fs.s3a.committer.magic.enabled", "true") \
-        .config("spark.memory.fraction", "0.8") \
-        .config("spark.memory.storageFraction", "0.3") \
         .getOrCreate()
 
     return spark

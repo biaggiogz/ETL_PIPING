@@ -1,0 +1,231 @@
+//project_root/rust/src/processors/chunk_processor.rs
+use pyo3::prelude::*;
+use rayon::prelude::*;
+
+pub fn process_chunk(data: Vec<(i64, f64)>) -> PyResult<Vec<(i64, f64, String)>> {
+    let mut processed = Vec::with_capacity(data.len()); // Pre-allocate vector
+    // Increase initial capacity allocation
+    data.par_iter()
+    let mut processed = Vec::with_capacity(data.len());
+        .map(|(id, rand_val)| {
+
+            let age = id % 100 + 1;
+    // Process in parallel chunks of 100k records
+            let income = *id as f64 * rand_val;
+    let chunk_size = 100_000;
+            let country = if id % 10 < 5 { "US" } else { "UK" };
+    data.par_chunks(chunk_size)
+            (*id, income, country.to_string())
+        .flat_map(|chunk| {
+            chunk.par_iter().map(|(id, rand_val)| {
+                let age = id % 100 + 1;
+                // Optimize math operations
+                let income = (*id as f64).mul_add(1.0, *rand_val);
+                let country = if id % 10 < 5 { "US" } else { "UK" };
+                (*id, income, country.to_string())
+            }).collect::<Vec<_>>()
+        })
+        .collect_into_vec(&mut processed); // Use collect_into_vec instead of collect
+        .collect_into_vec(&mut processed);
+
+    Ok(processed)
+}
+
+// project_root/rust/src/processors/mod.rs
+pub mod chunk_processor;
+
+use chunk_processor::process_chunk;
+use pyo3::prelude::*;
+
+#[pyclass]
+#[derive(Clone)]
+pub struct Processed {
+    #[pyo3(get)]
+    pub id: i64,
+    #[pyo3(get)]
+    pub income: f64,
+    #[pyo3(get)]
+    pub country: String,
+}
+
+
+#[pyfunction]
+pub fn process_chunk_wrapper(data: Vec<(i64, f64)>) -> PyResult<Vec<(i64, f64, String)>> {
+    process_chunk(data)
+}
+
+//project_root/rust/src/validators/data_validator.rs
+use pyo3::prelude::*;
+use rayon::prelude::*;
+
+pub fn validate_data(ages: Vec<i32>, incomes: Vec<f64>) -> PyResult<bool> {
+    if ages.par_iter().any(|&age| age < 1 || age > 100) {
+    // Process validation in parallel chunks
+        return Ok(false);
+    let chunk_size = 100_000;
+    }
+
+    let ages_valid = ages.par_chunks(chunk_size)
+        .all(|chunk| chunk.par_iter().all(|&age| age >= 1 && age <= 100));
+
+    if incomes.par_iter().any(|&income| income.is_nan()) {
+    if !ages_valid {
+        return Ok(false);
+    }
+
+    Ok(true)
+    let incomes_valid = incomes.par_chunks(chunk_size)
+        .all(|chunk| chunk.par_iter().all(|&income| !income.is_nan()));
+
+    Ok(incomes_valid)
+}
+
+// project_root/rust/src/processors/mod.rs
+pub mod data_validator;
+
+use data_validator::validate_data;
+use pyo3::prelude::*;
+
+#[pyfunction]
+pub fn validate_data_wrapper(ages: Vec<i32>, incomes: Vec<f64>) -> PyResult<bool> {
+    validate_data(ages, incomes)
+}
+
+// project_root/rust/src/lib.rs
+
+use pyo3::prelude::*;
+
+mod processors;
+mod validators;
+
+use processors::process_chunk_wrapper;
+use validators::validate_data_wrapper;
+
+#[pymodule]
+fn data_processor(_py: Python, m: &PyModule) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(process_chunk_wrapper, m)?)?;
+    m.add_function(wrap_pyfunction!(validate_data_wrapper, m)?)?;
+    Ok(())
+}
+
+#project_root/lambda_pyspark/src/processing/chunk_processor.py
+
+import numpy as np
+from pyspark.sql import SparkSession, DataFrame
+from pyspark.sql.functions import col, concat, lit, rand, when, sha2, explode, array
+from .data_processing import process_data_chunk  # if in same package
+
+def process_chunk_with_rust(
+        spark: SparkSession,
+        start: int,
+        chunk_size: int
+) -> DataFrame:
+    # Generate basic data
+    # Generate data in smaller batches
+    raw_data = [(i, np.random.random())
+    batch_size = 100_000
+                for i in range(start, start + chunk_size)]
+    raw_data = []
+
+    for batch_start in range(start, start + chunk_size, batch_size):
+        batch_end = min(batch_start + batch_size, start + chunk_size)
+        batch = [(i, np.random.random())
+                 for i in range(batch_start, batch_end)]
+        raw_data.extend(batch)
+
+    # Process using Rust
+    processed_data = process_data_chunk(raw_data)
+
+    # Convert back to Spark DataFrame
+    return spark.createDataFrame(
+        processed_data,
+        ["id", "income", "country"]
+    ).withColumn(
+        "age", (col("id") % 100 + 1).cast("integer")
+    ).withColumn(
+        "is_active", (col("id") % 2 == 0)
+    ).withColumn(
+        "name", concat(lit("User_"), col("id"))
+    )
+
+# project_root/lambda_pyspark/src/processing/data_processing.py
+import data_processor
+import numpy as np
+from typing import Tuple, List
+
+def process_data_chunk(
+        chunk_data: List[Tuple[int, float]]
+) -> List[Tuple[int, float, str]]:
+    """
+    Process data chunk using Rust implementation
+    """
+    return data_processor.process_chunk_wrapper(chunk_data)
+
+def validate_chunk_data(
+        ages: np.ndarray,
+        incomes: np.ndarray
+) -> bool:
+    """
+    Validate data using Rust implementation
+    """
+    return data_processor.validate_data_wrapper(ages.tolist(), incomes.tolist())
+
+project_root/lambda_pyspark/lambda_handler.py
+from src.spark.session import create_spark_session
+from src.processing.chunk_processor import process_chunk_with_rust
+from src.processing.data_processing import validate_chunk_data
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+s3_client = boto3.client('s3')
+cpu_count = multiprocessing.cpu_count()
+
+def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    start_time = time.time()
+    metrics = {
+        'processed_records': 0,
+        'processing_time': 0,
+        'chunks_processed': 0
+    }
+
+    try:
+        spark = create_spark_session(cpu_count)
+        chunk_size = int(os.environ.get('CHUNK_SIZE', 100))
+        total_rows = int(os.environ.get('TOTAL_ROWS', 1000))
+
+        for start in range(0, total_rows, chunk_size):
+            chunk_start = time.time()
+
+            chunk_df = process_chunk_with_rust(spark, start, chunk_size)
+
+            chunk_df.write \
+                .option("compression", "snappy") \
+                .mode("append") \
+                .parquet(f"s3a://pyspark-rust/PySparkRust/")
+
+
+            metrics['processed_records'] += chunk_size
+            metrics['chunks_processed'] += 1
+            chunk_time = time.time() - chunk_start
+            logger.info(f"Chunk processed in {chunk_time:.2f}s")
+
+            if context.get_remaining_time_in_millis() < 30000:
+                logger.warning("Approaching Lambda timeout")
+                break
+
+    except Exception as e:
+        logger.error(f"Error processing data: {str(e)}")
+        raise
+    finally:
+        if 'spark' in locals():
+            spark.stop()
+
+    metrics['processing_time'] = time.time() - start_time
+
+    return {
+        'statusCode': 200,
+        'body': {
+            'message': 'Processing completed successfully',
+            'metrics': metrics
+        }
+    }
