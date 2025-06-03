@@ -23,6 +23,7 @@ polars = { version = "0.35.4", features = [
     "strings",        # String operations
     "dtype-datetime"  # DateTime support
 ] }
+futures = "0.3"
 
 
 [profile.release]

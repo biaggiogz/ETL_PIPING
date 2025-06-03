@@ -1,0 +1,10 @@
+version = 0.1
+[default.deploy.parameters]
+stack_name = "lambda-rust-x86-64"
+resolve_s3 = true
+s3_prefix = "lambda-rust-x86-64"
+region = "us-east-1"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = "ImageUri=\"746669218362.dkr.ecr.us-east-1.amazonaws.com/rust-serverless:v01-rust-x86-64\" LambdaTimeout=\"900\" LambdaMemory=\"3008\" LambdaName=\"lambda-rust-x86-64\" DBNAME=\"piping\" BucketName=\"pyspark-rust\" NUMROWS=\"100000000\" CHUNKSIZE=\"10000000\""
+image_repositories = []
