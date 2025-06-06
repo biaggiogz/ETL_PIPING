@@ -41,8 +41,8 @@ pub struct NewSensorReadingHandler {}
 impl NewSensorReadingHandler {
     pub async fn handle(message: &NewSensorReading) -> Result<(), ()> {
         tracing::info!(
-            "New message is for temperature {} at time {}, position: ({}, {}), speed: {} km/s, connection: {} Mbps", 
-            message.temperature, 
+            "New message is for temperature {} at time {}, position: ({}, {}), speed: {} km/s, connection: {} Mbps",
+            message.temperature,
             message.reading_timestamp,
             message.position.latitude,
             message.position.longitude,

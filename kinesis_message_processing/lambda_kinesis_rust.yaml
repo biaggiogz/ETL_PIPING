@@ -92,6 +92,17 @@ Resources:
       Role: !GetAtt LambdaExecutionRole.Arn
       Architectures:
         - arm64
+      Environment:
+        Variables:
+          SNOWFLAKE_USERNAME: RUSTSPARK
+          SNOWFLAKE_PASSWORD: Snowflake2025.*
+          SNOWFLAKE_ACCOUNT: nvzape-hkc13589
+          SNOWFLAKE_ROLE: ACCOUNTADMIN
+          SNOWFLAKE_WAREHOUSE: COMPUTE_WH
+          SNOWFLAKE_DATABASE: RUSTSTREAMMING
+          SNOWFLAKE_SCHEMA: RUSTSTREAM
+          SNOWFLAKE_TABLE: SENSOR_READINGS
+
       EventInvokeConfig:
         MaximumRetryAttempts: 2
         MaximumEventAgeInSeconds: 300

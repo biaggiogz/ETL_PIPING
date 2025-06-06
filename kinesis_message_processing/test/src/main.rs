@@ -11,6 +11,7 @@ use clap::{arg, command, value_parser, ArgAction, Command};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use tokio::time::{sleep};
+use snowflake_connector_rs::{SnowflakeClient, SnowflakeAuthMethod, SnowflakeClientConfig};
 
 #[tokio::main]
 async fn main() {
@@ -21,14 +22,28 @@ async fn main() {
         .init();
 
     let matches = command!() // requires `cargo` feature
-        .arg(arg!([kinesis_stream] "Kinesis stream to operate on")
-            .required(true))
+        .subcommand(Command::new("kinesis")
+            .about("Run Kinesis test")
+            .arg(arg!([kinesis_stream] "Kinesis stream to operate on")
+                .required(true)))
+        .subcommand(Command::new("snowflake")
+            .about("Test Snowflake connection"))
         .get_matches();
 
-    let stream_arn = matches.get_one::<String>("kinesis_stream").unwrap();
+    if let Some(kinesis_matches) = matches.subcommand_matches("kinesis") {
+        let stream_arn = kinesis_matches.get_one::<String>("kinesis_stream").unwrap();
+        let kinesis_client = new_client("false".to_string()).await;
+        run_kinesis_test(kinesis_client, stream_arn).await;
+    } else if let Some(_) = matches.subcommand_matches("snowflake") {
+        match test_snowflake_connection().await {
+            Ok(_) => tracing::info!("Snowflake connection test successful"),
+            Err(e) => tracing::error!("Snowflake connection test failed: {}", e),
+        }
+    } else {
+        println!("Please specify a subcommand: 'kinesis' or 'snowflake'");
+    }
 
-    let kinesis_client = new_client("false".to_string()).await;
-
+async fn run_kinesis_test(kinesis_client: Client, stream_arn: &String) {
     let device_1 = IoTDevice::new("device1".to_string());
     let device_2 = IoTDevice::new("device2".to_string());
     let device_3 = IoTDevice::new("device3".to_string());
@@ -54,6 +69,7 @@ async fn main() {
 
         sleep(Duration::from_secs(1)).await;
     }
+}
 }
 
 struct IoTDevice {
@@ -135,4 +151,47 @@ async fn new_client(is_local: String) -> Client {
 
     let config = aws_sdk_kinesis::config::Builder::from(&sdk_config).build();
     Client::from_conf(config)
+}
+
+async fn test_snowflake_connection() -> Result<(), Box<dyn std::error::Error>> {
+    tracing::info!("Testing Snowflake connection...");
+    
+    // Create Snowflake client
+    let client = SnowflakeClient::new(
+        &var("SNOWFLAKE_USERNAME").unwrap_or_else(|_| "USERNAME".to_string()),
+        SnowflakeAuthMethod::Password(var("SNOWFLAKE_PASSWORD").unwrap_or_else(|_| "PASSWORD".to_string())),
+        SnowflakeClientConfig {
+            account: var("SNOWFLAKE_ACCOUNT").unwrap_or_else(|_| "ACCOUNT".to_string()),
+            role: Some(var("SNOWFLAKE_ROLE").unwrap_or_else(|_| "ROLE".to_string())),
+            warehouse: Some(var("SNOWFLAKE_WAREHOUSE").unwrap_or_else(|_| "WAREHOUSE".to_string())),
+            database: Some(var("SNOWFLAKE_DATABASE").unwrap_or_else(|_| "DATABASE".to_string())),
+            schema: Some(var("SNOWFLAKE_SCHEMA").unwrap_or_else(|_| "SCHEMA".to_string())),
+            timeout: Some(std::time::Duration::from_secs(30)),
+        },
+    )?;
+    
+    tracing::info!("Creating Snowflake session...");
+    let session = client.create_session().await?;
+
+    
+    tracing::info!("Querying test data...");
+    let query = "SELECT * FROM RUSTSTREAM.SENSOR_READINGS";
+    let rows = session.query(query).await?;
+
+    let query = "INSERT INTO RUSTSTREAM.SENSOR_READINGS (LATITUDE, LONGITUDE) VALUES (41.785, -36.9405)";
+    session.query(query).await?;
+    
+    // Print each row
+    for row in &rows {
+        tracing::info!("Row data: {:?}", row);
+    }
+
+    if rows.len() != 1 {
+        return Err("Expected 2 rows in result".into());
+    }
+    tracing::info!("Total rows: {}", rows.len());
+
+
+    tracing::info!("Snowflake connection test completed successfully");
+    Ok(())
 }

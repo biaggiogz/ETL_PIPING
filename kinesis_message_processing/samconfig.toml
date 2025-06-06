@@ -20,7 +20,7 @@ resolve_s3 = true
 s3_prefix = "kinesis-lambda-rust"
 region = "us-east-1"
 image_repositories = []
-parameter_overrides = "ImageUri=\"746669218362.dkr.ecr.us-east-1.amazonaws.com/rust-stream:v01-kinesis-rust-arm64\""
+parameter_overrides = "ImageUri=\"746669218362.dkr.ecr.us-east-1.amazonaws.com/rust-stream:v03-kinesis-rust-snowflake-arm64\""
 
 [default.package.parameters]
 resolve_s3 = true
