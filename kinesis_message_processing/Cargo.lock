@@ -1696,6 +1696,7 @@ name = "kinesis-lambda"
 version = "0.1.0"
 dependencies = [
  "aws_lambda_events 0.8.5",
+ "futures",
  "lambda_runtime 0.8.3",
  "serde_json",
  "shared",
@@ -2822,6 +2823,7 @@ name = "shared"
 version = "0.1.0"
 dependencies = [
  "aws_lambda_events 0.16.0",
+ "futures",
  "serde",
  "serde_json",
  "snowflake-connector-rs",
