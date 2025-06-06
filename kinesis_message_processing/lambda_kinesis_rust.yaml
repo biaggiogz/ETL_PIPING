@@ -9,6 +9,34 @@ Globals:
 Parameters:
   ImageUri:
     Type: String
+  SnowflakeUsername:
+    Type: String
+    Description: "Snowflake username"
+  SnowflakePassword:
+    Type: String
+    Description: "Snowflake password"
+  SnowflakeAccount:
+    Type: String
+    Description: "Snowflake account"
+  SnowflakeRole:
+    Type: String
+    Description: "Snowflake role"
+  SnowflakeWarehouse:
+    Type: String
+    Description: "Snowflake warehouse"
+  SnowflakeDatabase:
+    Type: String
+    Description: "Snowflake database"
+  SnowflakeSchema:
+    Type: String
+    Description: "Snowflake schema"
+  SnowflakeTable:
+    Type: String
+    Description: "Snowflake table"
+  BatchSize:
+    Type: Number
+    Default: 100
+    Description: "Batch size for processing"
 
 Resources:
   LambdaExecutionRole:
@@ -94,14 +122,15 @@ Resources:
         - arm64
       Environment:
         Variables:
-          SNOWFLAKE_USERNAME: RUSTSPARK
-          SNOWFLAKE_PASSWORD: Snowflake2025.*
-          SNOWFLAKE_ACCOUNT: nvzape-hkc13589
-          SNOWFLAKE_ROLE: ACCOUNTADMIN
-          SNOWFLAKE_WAREHOUSE: COMPUTE_WH
-          SNOWFLAKE_DATABASE: RUSTSTREAMMING
-          SNOWFLAKE_SCHEMA: RUSTSTREAM
-          SNOWFLAKE_TABLE: SENSOR_READINGS
+          SNOWFLAKE_USERNAME: !Ref SnowflakeUsername
+          SNOWFLAKE_PASSWORD: !Ref SnowflakePassword
+          SNOWFLAKE_ACCOUNT: !Ref SnowflakeAccount
+          SNOWFLAKE_ROLE: !Ref SnowflakeRole
+          SNOWFLAKE_WAREHOUSE: !Ref SnowflakeWarehouse
+          SNOWFLAKE_DATABASE: !Ref SnowflakeDatabase
+          SNOWFLAKE_SCHEMA: !Ref SnowflakeSchema
+          SNOWFLAKE_TABLE: !Ref SnowflakeTable
+          BATCH_SIZE: !Ref BatchSize
 
       EventInvokeConfig:
         MaximumRetryAttempts: 2
@@ -115,13 +144,13 @@ Resources:
           Type: Kinesis
           Properties:
             Stream: !GetAtt MessageStream.Arn
-            BatchSize: 100
+            BatchSize: !Ref BatchSize
             StartingPosition: LATEST
 
   MessageStream:
     Type: AWS::Kinesis::Stream
     Properties:
-      ShardCount: 1
+      ShardCount: 2
 
   FailedSensorReadingDLQ:
     Type: AWS::SQS::Queue
