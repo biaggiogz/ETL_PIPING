@@ -1,0 +1,30 @@
+# Ignore target directory (generated artifacts)
+target
+
+# Git files
+.git
+.gitignore
+
+# Local configs
+.env
+*.log
+
+# IDE/editor configs
+*.swp
+*.swo
+*.bak
+*.tmp
+.vscode
+.idea
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Dependency metadata
+node_modules
+Cargo.lock # Optional: only ignore if lockfile is not needed
+
+# Docker-specific
+.dockerignore
+Dockerfile

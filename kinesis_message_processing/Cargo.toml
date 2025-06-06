@@ -1,0 +1,8 @@
+[workspace]
+members = [ "lambda/mesagges", "lambda/shared", "test"]
+resolver = "2"
+
+[workspace.package]
+version = "1.0.0"
+license = "GPL-3"
+edition = "2021"

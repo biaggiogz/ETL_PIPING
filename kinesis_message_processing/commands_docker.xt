@@ -1,0 +1,38 @@
+aws ecr get-login-password | docker login --username AWS --password-stdin %AWS_ACCOUNT%.dkr.ecr.%AWS_REGION%.amazonaws.com
+set AWS_ACCOUNT=881490115226
+set AWS_REGION=us-east-1
+set v=01
+set name=spark-arm64
+
+docker tag %name%:%v% %AWS_ACCOUNT%.dkr.ecr.%AWS_REGION%.amazonaws.com/rust-serverless:v%v%-%name%
+docker push %AWS_ACCOUNT%.dkr.ecr.%AWS_REGION%.amazonaws.com/rust-serverless:v%v%-%name%
+
+docker build -f DockerfileSparkScala -t "%name%:%v%" --provenance=false ./
+
+curl -X POST "http://localhost:9000/2015-03-31/functions/function/invocations" -H "Content-Type: application/json" --data-binary @event.json
+
+docker run -it -d --platform linux/arm64 -p 9000:8080 --env-file .env --name spark-e ${name}:${v}
+
+docker run -it -d -p 9000:8080 --name spark-rust "%name%:%v%"
+
+export v=01
+export name=kinesis-rust-arm64
+export AWS_ACCOUNT=746669218362
+export AWS_REGION=us-east-1
+
+docker buildx build --platform linux/arm64 --build-arg package=kinesis-lambda \
+  --build-arg TARGETPLATFORM=linux/arm64 \
+  -f Dockerfile \
+  -t ${name}:${v} .
+
+docker tag ${name}:${v} ${AWS_ACCOUNT}.dkr.ecr.${AWS_REGION}.amazonaws.com/rust-stream:v${v}-${name}
+docker push ${AWS_ACCOUNT}.dkr.ecr.${AWS_REGION}.amazonaws.com/rust-stream:v${v}-${name}
+
+set V=01
+set NAME=rust-x86-64
+set AWS_ACCOUNT=746669218362
+set AWS_REGION=us-east-1
+docker build -f Dockerfile -t "%NAME%:%V%" --platform linux/amd64 --provenance=false ./
+
+aws ecr get-login-password | docker login --username AWS --password-stdin ${AWS_ACCOUNT}.dkr.ecr.${AWS_REGION}.amazonaws.com
+

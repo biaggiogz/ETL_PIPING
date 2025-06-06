@@ -1,0 +1,30 @@
+FROM public.ecr.aws/lambda/provided:al2 as build
+
+# Install Rust and cargo-lambda
+RUN yum install -y gcc openssl-devel curl && \
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && \
+    source $HOME/.cargo/env && \
+    curl -sSL https://github.com/cargo-lambda/cargo-lambda/releases/latest/download/cargo-lambda-x86_64-unknown-linux-gnu.tar.gz | tar -xz && \
+    mv cargo-lambda /usr/local/bin
+
+# Set up build environment
+WORKDIR /usr/src/app
+COPY Cargo.toml Cargo.lock ./
+COPY lambda/ ./lambda/
+COPY test/ ./test/
+
+# Build the Lambda function for x86_64 architecture
+RUN source $HOME/.cargo/env && \
+    cargo lambda build --release -p kinesis-lambda
+
+# Create the runtime image
+FROM public.ecr.aws/lambda/provided:al2
+
+# Copy the compiled binary
+COPY --from=build /usr/src/app/target/lambda/kinesis-lambda/bootstrap ${LAMBDA_RUNTIME_DIR}/bootstrap
+
+# Set permissions
+RUN chmod +x ${LAMBDA_RUNTIME_DIR}/bootstrap
+
+# Set the CMD to your handler
+CMD ["bootstrap"]
