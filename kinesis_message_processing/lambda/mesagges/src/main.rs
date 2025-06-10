@@ -97,12 +97,13 @@ impl SnowflakePool {
         );
 
         // Execute with timeout
+        let chunk_start = std::time::Instant::now();
         let query_future = session.query(query);
         match tokio::time::timeout(Duration::from_millis(timeout_ms), query_future).await {
             Ok(result) => {
                 match result {
                     Ok(_) => {
-                        let elapsed = std::time::Instant::now().elapsed();
+                        let elapsed = chunk_start.elapsed();
                         tracing::info!("Inserted batch of {} records in {:.2?}", readings.len(), elapsed);
                     },
                     Err(e) => return Err(Box::new(e)),
