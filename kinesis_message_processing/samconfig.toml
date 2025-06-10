@@ -20,7 +20,7 @@ resolve_s3 = true
 s3_prefix = "kinesis-lambda-rust"
 region = "us-east-1"
 image_repositories = []
-parameter_overrides = "ImageUri=\"746669218362.dkr.ecr.us-east-1.amazonaws.com/rust-stream:v10-kinesis-rust-snowflake-arm64\" SnowflakeUsername=\"RUSTSPARK\" SnowflakePassword=\"Snowflake2025.*\" SnowflakeAccount=\"jnvzape-hkc13589\" SnowflakeRole=\"ACCOUNTADMIN\" SnowflakeWarehouse=\"COMPUTE_WH\" SnowflakeDatabase=\"RUSTSTREAMMING\" SnowflakeSchema=\"RUSTSTREAM\" SnowflakeTable=\"SENSOR_READINGS\" BatchSize=\"100\""
+parameter_overrides = "ImageUri=\"746669218362.dkr.ecr.us-east-1.amazonaws.com/rust-stream:v21-kinesis-rust-snowflake-arm64\" SnowflakeUsername=\"RUSTSPARK\" SnowflakePassword=\"Snowflake2025.*\" SnowflakeAccount=\"jnvzape-hkc13589\" SnowflakeRole=\"ACCOUNTADMIN\" SnowflakeWarehouse=\"COMPUTE_WH\" SnowflakeDatabase=\"RUSTSTREAMMING\" SnowflakeSchema=\"RUSTSTREAM\" SnowflakeTable=\"SENSOR_READINGS\" BatchSize=\"100\" MaxConnections=\"4\" MaxBatchSize=\"2000\" MinBatchsize=\"100\" TimeoutMS=\"100\""
 
 [default.package.parameters]
 resolve_s3 = true

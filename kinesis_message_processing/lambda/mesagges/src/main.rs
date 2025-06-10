@@ -10,9 +10,24 @@ use tokio::sync::Mutex;
 use futures::future::{join_all, FutureExt};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
+use aws_sdk_sqs::{Client as SqsClient, types::SendMessageBatchRequestEntry};
 
 // Concurrency limiter for Snowflake connections
 static ACTIVE_CONNECTIONS: AtomicUsize = AtomicUsize::new(0);
+
+// Helper function to get environment variables with defaults
+fn get_env_usize(key: &str, default: usize) -> usize {
+    var(key).ok()
+        .and_then(|val| val.parse().ok())
+        .unwrap_or(default)
+}
+
+fn get_env_u64(key: &str, default: u64) -> u64 {
+    var(key).ok()
+        .and_then(|val| val.parse().ok())
+        .unwrap_or(default)
+}
 
 // Global connection pool for Snowflake
 struct SnowflakePool {
@@ -21,17 +36,20 @@ struct SnowflakePool {
 
 impl SnowflakePool {
     async fn new() -> Result<Self, Box<dyn std::error::Error>> {
+        let timeout_ms = get_env_u64("TIMEOUT_MS", 95);
+        
+        let mut config = SnowflakeClientConfig::default();
+        config.account = var("SNOWFLAKE_ACCOUNT").unwrap_or_else(|_| "ACCOUNT".to_string());
+        config.role = Some(var("SNOWFLAKE_ROLE").unwrap_or_else(|_| "ROLE".to_string()));
+        config.warehouse = Some(var("SNOWFLAKE_WAREHOUSE").unwrap_or_else(|_| "WAREHOUSE".to_string()));
+        config.database = Some(var("SNOWFLAKE_DATABASE").unwrap_or_else(|_| "DATABASE".to_string()));
+        config.schema = Some(var("SNOWFLAKE_SCHEMA").unwrap_or_else(|_| "SCHEMA".to_string()));
+        config.timeout = Some(Duration::from_millis(timeout_ms));
+        
         let client = SnowflakeClient::new(
             &var("SNOWFLAKE_USERNAME").unwrap_or_else(|_| "USERNAME".to_string()),
             SnowflakeAuthMethod::Password(var("SNOWFLAKE_PASSWORD").unwrap_or_else(|_| "PASSWORD".to_string())),
-            SnowflakeClientConfig {
-                account: var("SNOWFLAKE_ACCOUNT").unwrap_or_else(|_| "ACCOUNT".to_string()),
-                role: Some(var("SNOWFLAKE_ROLE").unwrap_or_else(|_| "ROLE".to_string())),
-                warehouse: Some(var("SNOWFLAKE_WAREHOUSE").unwrap_or_else(|_| "WAREHOUSE".to_string())),
-                database: Some(var("SNOWFLAKE_DATABASE").unwrap_or_else(|_| "DATABASE".to_string())),
-                schema: Some(var("SNOWFLAKE_SCHEMA").unwrap_or_else(|_| "SCHEMA".to_string())),
-                timeout: Some(std::time::Duration::from_millis(950)), // Reduced timeout for faster failure detection
-            },
+            config,
         )?;
 
         // Pre-warm the connection
@@ -49,18 +67,16 @@ impl SnowflakePool {
 
         // Use connection pooling - session is already pooled
         let session = self.client.create_session().await?;
-
-        // Use prepared statement with bulk insert
-        let batch_size: usize = var("BATCH_SIZE")
-            .unwrap_or_else(|_| "25".to_string()) // Default to 25 if not set
-            .parse()
-            .unwrap_or(25); // Use 25 if parsing fails
+        let batch_size = get_env_usize("BATCH_SIZE", 100);
+        let timeout_ms = get_env_u64("TIMEOUT_MS", 95);
 
         for chunk in readings.chunks(batch_size) {
             let chunk_start = std::time::Instant::now();
 
-            // Build values for this chunk
+            // Pre-allocate values vector with exact capacity
             let mut values = Vec::with_capacity(chunk.len());
+            
+            // Build values for this chunk
             for (reading, partition_key) in chunk {
                 let timestamp_seconds = reading.reading_timestamp / 1000.0;
 
@@ -86,7 +102,7 @@ impl SnowflakePool {
 
             // Execute with timeout
             let query_future = session.query(query);
-            match tokio::time::timeout(std::time::Duration::from_millis(950), query_future).await {
+            match tokio::time::timeout(Duration::from_millis(timeout_ms), query_future).await {
                 Ok(result) => {
                     match result {
                         Ok(_) => {
@@ -105,43 +121,67 @@ impl SnowflakePool {
     }
 }
 
-async fn function_handler(event: LambdaEvent<KinesisEvent>, pool: Arc<Mutex<SnowflakePool>>) -> Result<KinesisEventResponse, Error> {
+// Structure to track record processing for DLQ reporting
+#[derive(Debug, Clone)]
+struct RecordProcessingResult {
+    sequence_number: String,
+    partition_key: String,
+    data: Vec<u8>,
+    error: Option<String>,
+}
+
+async fn function_handler(event: LambdaEvent<KinesisEvent>, pool: Arc<Mutex<SnowflakePool>>) -> Result<(KinesisEventResponse, Vec<RecordProcessingResult>), Error> {
     let start_time = std::time::Instant::now();
-    let mut batch_item_failures = Vec::new();
+    
+    // Pre-allocate with expected capacity
+    let record_count = event.payload.records.len();
+    let mut batch_item_failures = Vec::with_capacity(record_count / 10); // Assume ~10% failure rate
+    
+    // Fast path for empty events
+    if record_count == 0 {
+        return Ok((
+            KinesisEventResponse { batch_item_failures },
+            Vec::new()
+        ));
+    }
 
     // Group records by partition key for more efficient processing
-    let mut partition_groups: HashMap<String, Vec<(Option<String>, &[u8])>> = HashMap::new();
+    let mut partition_groups: HashMap<String, Vec<(String, &[u8], String)>> = HashMap::with_capacity(16);
 
-    // First pass: group records by partition key
+    // First pass: group records by partition key and ensure we have sequence numbers
     for message in &event.payload.records {
-        let kinesis_sequence_number = message.kinesis.sequence_number.clone();
+        // Skip records without sequence numbers
+        let sequence_number = match &message.kinesis.sequence_number {
+            Some(sn) => sn.clone(),
+            None => {
+                tracing::warn!("Record without sequence number, skipping");
+                continue;
+            }
+        };
+        
         let partition_key = message.kinesis.partition_key.clone().unwrap_or_default();
+        let data = message.kinesis.data.0.as_slice();
 
         partition_groups
-            .entry(partition_key)
-            .or_default()
-            .push((kinesis_sequence_number, message.kinesis.data.0.as_slice()));
+            .entry(partition_key.clone())
+            .or_insert_with(|| Vec::with_capacity(record_count / 8))
+            .push((sequence_number, data, partition_key));
     }
 
     // Process each partition group in parallel
-    let mut futures = Vec::new();
+    let mut futures = Vec::with_capacity(partition_groups.len());
+    let max_connections = get_env_usize("MAX_CONNECTIONS", 4);
 
     for (partition_key, records) in partition_groups {
         let pool_clone = Arc::clone(&pool);
-        let partition_key_clone = partition_key.clone();
+        let partition_key_clone = partition_key;
 
         let future = async move {
-            let mut successful_readings = Vec::new();
-            let mut failed_sequence_numbers = Vec::new();
+            let mut successful_readings = Vec::with_capacity(records.len());
+            let mut failed_records = Vec::new();
 
             // Process records in this partition
-            for (sequence_number, data) in records {
-                // Skip records without sequence numbers (shouldn't happen in practice)
-                let sequence_number = match sequence_number {
-                    Some(sn) => sn,
-                    None => continue,
-                };
-
+            for (sequence_number, data, partition_key) in records {
                 // Parse the data
                 let parse_result: Result<NewSensorReading, _> = from_slice(data);
 
@@ -151,17 +191,29 @@ async fn function_handler(event: LambdaEvent<KinesisEvent>, pool: Arc<Mutex<Snow
                         match NewSensorReadingHandler::handle(&sensor_reading).await {
                             Ok(_) => {
                                 // Add to successful batch
-                                successful_readings.push((sensor_reading, partition_key_clone.clone()));
+                                successful_readings.push((sensor_reading, partition_key));
                             },
-                            Err(_) => {
-                                tracing::warn!("Business logic rejected reading with sequence number: {}", sequence_number);
-                                failed_sequence_numbers.push(sequence_number);
+                            Err(e) => {
+                                let error_msg = format!("Business logic rejected reading: {:?}", e);
+                                tracing::warn!("{} with sequence number: {}", error_msg, sequence_number);
+                                failed_records.push(RecordProcessingResult {
+                                    sequence_number,
+                                    partition_key,
+                                    data: data.to_vec(),
+                                    error: Some(error_msg),
+                                });
                             }
                         }
                     },
                     Err(e) => {
-                        tracing::error!("Failed to parse message: {}", e);
-                        failed_sequence_numbers.push(sequence_number);
+                        let error_msg = format!("Failed to parse message: {}", e);
+                        tracing::error!("{}", error_msg);
+                        failed_records.push(RecordProcessingResult {
+                            sequence_number,
+                            partition_key,
+                            data: data.to_vec(),
+                            error: Some(error_msg),
+                        });
                     }
                 }
             }
@@ -170,7 +222,7 @@ async fn function_handler(event: LambdaEvent<KinesisEvent>, pool: Arc<Mutex<Snow
             if !successful_readings.is_empty() {
                 // Check if we can proceed with another connection
                 let current = ACTIVE_CONNECTIONS.load(Ordering::SeqCst);
-                if current >= 4 {
+                if current >= max_connections {
                     // Wait a bit if too many active connections
                     tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
                 }
@@ -187,9 +239,26 @@ async fn function_handler(event: LambdaEvent<KinesisEvent>, pool: Arc<Mutex<Snow
                 ACTIVE_CONNECTIONS.fetch_sub(1, Ordering::SeqCst);
 
                 if let Err(e) = result {
-                    tracing::error!("Failed to batch insert records: {}", e);
-                    // We can't mark specific records as failed here since we've lost the mapping
-                    // Just log the error and continue
+                    let error_msg = format!("Failed to batch insert records: {}", e);
+                    tracing::error!("{}", error_msg);
+                    
+                    // Mark all records in this batch as failed
+                    for (reading, partition_key) in successful_readings {
+                        // We need to reconstruct the original data since we don't have it anymore
+                        // This is a best-effort approach to ensure records go to DLQ
+                        let data = serde_json::to_vec(&reading).unwrap_or_else(|_| Vec::new());
+                        
+                        // Generate a placeholder sequence number since we lost the original
+                        // The important part is that we report the failure to the Lambda service
+                        let seq_num = format!("batch-failure-{}", reading.reading_timestamp);
+                        
+                        failed_records.push(RecordProcessingResult {
+                            sequence_number: seq_num,
+                            partition_key,
+                            data,
+                            error: Some(error_msg.clone()),
+                        });
+                    }
                 } else {
                     let elapsed = insert_start.elapsed();
                     tracing::info!("Batch insert for partition {} completed in {:.2?}",
@@ -197,7 +266,7 @@ async fn function_handler(event: LambdaEvent<KinesisEvent>, pool: Arc<Mutex<Snow
                 }
             }
 
-            failed_sequence_numbers
+            failed_records
         };
 
         futures.push(future.boxed());
@@ -206,26 +275,31 @@ async fn function_handler(event: LambdaEvent<KinesisEvent>, pool: Arc<Mutex<Snow
     // Wait for all partition groups to be processed
     let results = join_all(futures).await;
 
-    // Collect all failures
-    for failed_sequence_numbers in results {
-        for sequence_number in failed_sequence_numbers {
+    // Collect all failed records for DLQ and Lambda's batch item failures response
+    let mut all_failed_records = Vec::new();
+    for failed_records in &results {
+        for record in failed_records {
             batch_item_failures.push(KinesisBatchItemFailure {
-                item_identifier: Some(sequence_number)
+                item_identifier: Some(record.sequence_number.clone())
             });
+            all_failed_records.push(record.clone());
         }
     }
 
     let elapsed = start_time.elapsed();
     tracing::info!(
         "Processed {} records ({} failed) in {:.2?}",
-        event.payload.records.len(),
+        record_count,
         batch_item_failures.len(),
         elapsed
     );
 
-    Ok(KinesisEventResponse {
-        batch_item_failures,
-    })
+    Ok((
+        KinesisEventResponse {
+            batch_item_failures,
+        },
+        all_failed_records
+    ))
 }
 
 #[tokio::main]
@@ -235,6 +309,16 @@ async fn main() -> Result<(), Error> {
         .with_target(false)
         .without_time()
         .init();
+
+    // Initialize AWS SDK
+    let config = aws_config::load_from_env().await;
+    let sqs_client = SqsClient::new(&config);
+    
+    // Get DLQ URL from environment variable
+    let dlq_url = var("DLQ_URL").unwrap_or_else(|_| {
+        tracing::warn!("DLQ_URL not set, failed records will not be sent to DLQ");
+        String::new()
+    });
 
     // Initialize Snowflake connection pool
     let pool = match SnowflakePool::new().await {
@@ -248,14 +332,83 @@ async fn main() -> Result<(), Error> {
         }
     };
 
-    // Create a closure that captures the pool
+    // Create a closure that captures the pool and SQS client
     let handler_func = move |event: LambdaEvent<KinesisEvent>| {
         let pool_clone = Arc::clone(&pool);
-        async move { function_handler(event, pool_clone).await }
+        let sqs_client_clone = sqs_client.clone();
+        let dlq_url_clone = dlq_url.clone();
+        
+        async move { 
+            let (response, failed_records) = function_handler(event, pool_clone).await?;
+            
+            // Send failed records to DLQ if URL is provided
+            if !dlq_url_clone.is_empty() && !failed_records.is_empty() {
+                send_to_dlq(&sqs_client_clone, &dlq_url_clone, failed_records).await?;
+            }
+            
+            Ok::<KinesisEventResponse, Error>(response)
+        }
     };
 
     match run(service_fn(handler_func)).await {
         Ok(_) => Ok(()),
         Err(e) => Err(Error::from(e.to_string())),
     }
+}
+// Function to send failed records to DLQ
+async fn send_to_dlq(
+    sqs_client: &SqsClient,
+    queue_url: &str,
+    failed_records: Vec<RecordProcessingResult>,
+) -> Result<(), Error> {
+    if failed_records.is_empty() {
+        return Ok(());
+    }
+
+    // Process in batches of 10 (SQS batch limit)
+    for chunk in failed_records.chunks(10) {
+        let mut entries = Vec::with_capacity(chunk.len());
+        
+        for (i, record) in chunk.iter().enumerate() {
+            // Create a message that includes the original data and error information
+            let message_body = serde_json::json!({
+                "sequence_number": record.sequence_number,
+                "partition_key": record.partition_key,
+                "data_base64": base64::encode(&record.data),
+                "error": record.error,
+                "timestamp": chrono::Utc::now().to_rfc3339(),
+            });
+            
+            entries.push(
+                SendMessageBatchRequestEntry::builder()
+                    .id(format!("msg-{}", i))
+                    .message_body(message_body.to_string())
+                    .build(),
+            );
+        }
+        
+        // Send batch to SQS
+        match sqs_client
+            .send_message_batch()
+            .queue_url(queue_url)
+            .set_entries(Some(entries))
+            .send()
+            .await
+        {
+            Ok(response) => {
+                if let Some(failed) = response.failed {
+                    if !failed.is_empty() {
+                        tracing::error!("Failed to send {} messages to DLQ", failed.len());
+                    }
+                }
+                tracing::info!("Sent {} failed records to DLQ", chunk.len());
+            }
+            Err(e) => {
+                tracing::error!("Error sending to DLQ: {}", e);
+                // Continue processing other batches even if this one failed
+            }
+        }
+    }
+    
+    Ok(())
 }

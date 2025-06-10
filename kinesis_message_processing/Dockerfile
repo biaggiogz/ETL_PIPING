@@ -18,6 +18,7 @@ RUN cargo chef cook --release --recipe-path recipe.json
 # Builder stage - builds the app
 FROM chef AS builder
 WORKDIR /usr/src/app
+
 # 1. Copy dependencies first
 COPY --from=cacher /usr/src/app/target target
 # 2. Copy project files (Cargo.toml, source code)

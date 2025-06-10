@@ -1,5 +1,5 @@
 use aws_lambda_events::kinesis::{KinesisEventRecord};
-use serde::{Deserialize};
+use serde::{Deserialize, Serialize};
 use serde_json::Error;
 
 #[derive(Debug)]
@@ -20,7 +20,7 @@ impl InternalKinesisMessage{
     }
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Serialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct NewSensorReading {
     pub temperature: f32,
@@ -30,7 +30,7 @@ pub struct NewSensorReading {
     pub connection_speed_mbps: f32
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Serialize, Debug)]
 pub struct Position {
     pub latitude: f32,
     pub longitude: f32,

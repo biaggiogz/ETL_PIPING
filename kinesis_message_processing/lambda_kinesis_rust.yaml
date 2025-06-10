@@ -37,8 +37,30 @@ Parameters:
     Type: Number
     Default: 100
     Description: "Batch size for processing"
+  MaxConnections:
+    Type: Number
+    Default: 4
+  MaxBatchSize:
+    Type: Number
+    Default: 2000
+  MinBatchsize:
+    Type: Number
+    Default: 100
+  TimeoutMS:
+    Type: Number
+    Default: 100
 
 Resources:
+  SensorReadingQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: serverless-rust-KinesisSensorQueue
+
+  FailedSensorReadingDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: serverless-rust-KinesisSensorDLQ
+
   LambdaExecutionRole:
     Type: 'AWS::IAM::Role'
     Properties:
@@ -54,7 +76,6 @@ Resources:
       ManagedPolicyArns:
         - 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
       Policies:
-        # Policy for ECR access to pull container images
         - PolicyName: 'ECRAccess'
           PolicyDocument:
             Version: '2012-10-17'
@@ -74,7 +95,6 @@ Resources:
                     - Region: !Select [3, !Split [".", !Ref ImageUri ]]
                       Account: !Select [0, !Split [".", !Ref ImageUri ]]
                       RepositoryName: !Select [1, !Split ["/", !Select [ 0, !Split [":", !Select [5, !Split [".", !Ref ImageUri ]]]]]]
-        # Policy for CloudWatch logs
         - PolicyName: cloudwatch
           PolicyDocument:
             Version: '2012-10-17'
@@ -85,7 +105,6 @@ Resources:
                   - 'logs:CreateLogStream'
                   - 'logs:PutLogEvents'
                 Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${AWS::StackName}:*'
-        # Policy for Kinesis stream access
         - PolicyName: KinesisAccess
           PolicyDocument:
             Version: '2012-10-17'
@@ -97,7 +116,6 @@ Resources:
                   - kinesis:DescribeStream
                   - kinesis:ListShards
                 Resource: !GetAtt MessageStream.Arn
-        # Policy for SQS DLQ access
         - PolicyName: SQSAccess
           PolicyDocument:
             Version: '2012-10-17'
@@ -107,8 +125,16 @@ Resources:
                   - sqs:SendMessage
                 Resource: !GetAtt FailedSensorReadingDLQ.Arn
 
+  MessageStream:
+    Type: AWS::Kinesis::Stream
+    Properties:
+      ShardCount: 2
+
   LambdaFunction:
     Type: AWS::Serverless::Function
+    DependsOn:
+      - LambdaExecutionRole
+      - FailedSensorReadingDLQ
     Metadata:
       BuildMethod: rust-cargolambda
       BuildProperties:
@@ -131,7 +157,11 @@ Resources:
           SNOWFLAKE_SCHEMA: !Ref SnowflakeSchema
           SNOWFLAKE_TABLE: !Ref SnowflakeTable
           BATCH_SIZE: !Ref BatchSize
-
+          MAX_CONNECTIONS: !Ref MaxConnections
+          MAX_BATCH_SIZE: !Ref MaxBatchSize
+          MIN_BATCH_SIZE: !Ref MinBatchsize
+          TIMEOUT_MS: !Ref TimeoutMS
+          DLQ_URL: !Ref FailedSensorReadingDLQ
       EventInvokeConfig:
         MaximumRetryAttempts: 2
         MaximumEventAgeInSeconds: 300
@@ -147,17 +177,13 @@ Resources:
             BatchSize: !Ref BatchSize
             StartingPosition: LATEST
 
-  MessageStream:
-    Type: AWS::Kinesis::Stream
-    Properties:
-      ShardCount: 2
-
-  FailedSensorReadingDLQ:
-    Type: AWS::SQS::Queue
-    Properties:
-      QueueName: serverless-rust-KinesisSensorDLQ
-
 Outputs:
   StreamARN:
     Description: "Stream ARN"
     Value: !GetAtt MessageStream.Arn
+  DLQUrl:
+    Description: "Dead Letter Queue URL"
+    Value: !Ref FailedSensorReadingDLQ
+  QueueUrl:
+    Description: "Main Queue URL"
+    Value: !Ref SensorReadingQueue
