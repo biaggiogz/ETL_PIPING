@@ -4,17 +4,16 @@ use lambda_runtime::{run, service_fn, Error, LambdaEvent};
 use shared::{NewSensorReading, NewSensorReadingHandler};
 use std::env::var;
 use std::sync::Arc;
-use snowflake_connector_rs::{SnowflakeClient, SnowflakeAuthMethod, SnowflakeClientConfig};
+use snowflake_connector_rs::{SnowflakeClient, SnowflakeAuthMethod, SnowflakeClientConfig, SnowflakeSession};
 use serde_json::from_slice;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Semaphore};
 use futures::future::{join_all, FutureExt};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 use aws_sdk_sqs::{Client as SqsClient, types::SendMessageBatchRequestEntry};
 
-// Concurrency limiter for Snowflake connections
-static ACTIVE_CONNECTIONS: AtomicUsize = AtomicUsize::new(0);
+// Connection pooling is now handled by SnowflakePool
 
 // Helper function to get environment variables with defaults
 fn get_env_usize(key: &str, default: usize) -> usize {
@@ -32,12 +31,18 @@ fn get_env_u64(key: &str, default: u64) -> u64 {
 // Global connection pool for Snowflake
 struct SnowflakePool {
     client: SnowflakeClient,
+    sessions: Mutex<Vec<Arc<SnowflakeSession>>>,
+    max_sessions: usize,
 }
 
+
 impl SnowflakePool {
-    async fn new() -> Result<Self, Box<dyn std::error::Error>> {
+    async fn new() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let timeout_ms = get_env_u64("TIMEOUT_MS", 95);
-        
+        let max_connections = get_env_usize("MAX_CONNECTIONS", 6);
+        let semaphore = Arc::new(Semaphore::new(max_connections));
+
+
         let mut config = SnowflakeClientConfig::default();
         config.account = var("SNOWFLAKE_ACCOUNT").unwrap_or_else(|_| "ACCOUNT".to_string());
         config.role = Some(var("SNOWFLAKE_ROLE").unwrap_or_else(|_| "ROLE".to_string()));
@@ -52,29 +57,60 @@ impl SnowflakePool {
             config,
         )?;
 
-        // Pre-warm the connection
-        let session = client.create_session().await?;
-        session.query("SELECT 1").await?;
-        tracing::info!("Snowflake connection pre-warmed successfully");
+        // Pre-warm connections
+        let mut sessions = Vec::with_capacity(max_connections);
+        for _ in 0..max_connections {
+            let session = Arc::new(client.create_session().await?);
+            session.query("SELECT 1").await?;
+            sessions.push(session);
+        }
 
-        Ok(Self { client })
+        tracing::info!("Snowflake connection pool created with {} pre-warmed connections", max_connections);
+
+        Ok(Self {
+            client,
+            sessions: Mutex::new(sessions),
+            max_sessions: max_connections,
+        })
     }
 
-    async fn batch_insert(&self, readings: &[(NewSensorReading, String)]) -> Result<(), Box<dyn std::error::Error>> {
+    // 2. Get a session from the pool or create a new one if needed
+    async fn get_session(&self) -> Result<Arc<SnowflakeSession>, Box<dyn std::error::Error + Send + Sync>> {
+        let mut sessions = self.sessions.lock().await;
+        if let Some(session) = sessions.pop() {
+            return Ok(session);
+        }
+
+        // Create a new session if pool is empty
+        let session = Arc::new(self.client.create_session().await?);
+        Ok(session)
+    }
+
+    // 3. Return a session to the pool
+    async fn return_session(&self, session: Arc<SnowflakeSession>) {
+        let mut sessions = self.sessions.lock().await;
+        if sessions.len() < self.max_sessions {
+            sessions.push(session);
+        }
+    }
+
+
+
+    async fn batch_insert(&self, readings: &[(NewSensorReading, String)]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         if readings.is_empty() {
             return Ok(());
         }
 
-        // Use connection pooling - session is already pooled
-        let session = self.client.create_session().await?;
+        // Get a session from the pool
+        let session = self.get_session().await?;
         let batch_size = get_env_usize("BATCH_SIZE", 50);
         let timeout_ms = get_env_u64("TIMEOUT_MS", 500);
 
-        // Create a single large query for all records instead of chunking
-        // This reduces the number of round trips to Snowflake
-        let mut values = Vec::with_capacity(readings.len());
-
-        for (reading, partition_key) in readings {
+        // Process in chunks based on batch size to avoid too large SQL statements
+        for chunk in readings.chunks(batch_size) {
+            // Build values for this chunk
+            let mut values = Vec::with_capacity(chunk.len());
+            for (reading, partition_key) in chunk {
             let timestamp_seconds = reading.reading_timestamp / 1000.0;
             values.push(format!(
                 "({}, TO_TIMESTAMP_NTZ({}), {}, {}, {}, {}, '{}')",
@@ -96,24 +132,32 @@ impl SnowflakePool {
             values.join(", ")
         );
 
-        // Execute with timeout
+        // Execute with timeout and proper timing
         let chunk_start = std::time::Instant::now();
         let query_future = session.query(query);
-        match tokio::time::timeout(Duration::from_millis(timeout_ms), query_future).await {
+        let result = match tokio::time::timeout(Duration::from_millis(timeout_ms), query_future).await {
             Ok(result) => {
                 match result {
                     Ok(_) => {
                         let elapsed = chunk_start.elapsed();
-                        tracing::info!("Inserted batch of {} records in {:.2?}", readings.len(), elapsed);
+                        tracing::info!("Inserted batch of {} records in {:.2?}", chunk.len(), elapsed);
+                        Ok(())
                     },
-                    Err(e) => return Err(Box::new(e)),
+                    Err(e) => Err(Box::new(e) as Box<dyn std::error::Error + Send + Sync>),
                 }
             },
-            Err(_) => {
-                return Err("Query timeout exceeded".into());
-            }
-        }
+            Err(_) => Err("Query timeout exceeded".into()),
+        };
 
+        if result.is_err() {
+            // Return the session to the pool
+            self.return_session(session).await;
+            return result;
+        }
+        }
+        
+        // Return the session to the pool after all chunks are processed
+        self.return_session(session).await;
         Ok(())
     }
 }
@@ -165,15 +209,23 @@ async fn function_handler(event: LambdaEvent<KinesisEvent>, pool: Arc<Mutex<Snow
             .push((sequence_number, data, partition_key));
     }
 
-    // Process each partition group in parallel
+    // Process each partition group in parallel with a semaphore to control concurrency
     let mut futures = Vec::with_capacity(partition_groups.len());
-    let max_connections = get_env_usize("MAX_CONNECTIONS", 4);
+    let max_connections = get_env_usize("MAX_CONNECTIONS", 6);
+    let semaphore = Arc::new(Semaphore::new(max_connections));
 
     for (partition_key, records) in partition_groups {
         let pool_clone = Arc::clone(&pool);
+        let semaphore_clone = Arc::clone(&semaphore);
         let partition_key_clone = partition_key;
 
         let future = async move {
+            // Acquire a permit from the semaphore to limit concurrent connections
+            let _permit = semaphore_clone.acquire().await.unwrap();
+            
+            // Clone the pool to make it Send
+            let pool_clone_inner = pool_clone.clone();
+            
             let mut successful_readings = Vec::with_capacity(records.len());
             let mut failed_records = Vec::new();
 
@@ -217,23 +269,12 @@ async fn function_handler(event: LambdaEvent<KinesisEvent>, pool: Arc<Mutex<Snow
 
             // Batch insert successful readings
             if !successful_readings.is_empty() {
-                // Check if we can proceed with another connection
-                let current = ACTIVE_CONNECTIONS.load(Ordering::SeqCst);
-                if current >= max_connections {
-                    // Wait a bit if too many active connections
-                    tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-                }
-
-                // Increment active connections counter
-                ACTIVE_CONNECTIONS.fetch_add(1, Ordering::SeqCst);
-
-                let pool_guard = pool_clone.lock().await;
+                let pool_guard = pool_clone_inner.lock().await;
                 let insert_start = std::time::Instant::now();
 
                 let result = pool_guard.batch_insert(&successful_readings).await;
 
-                // Decrement counter when done
-                ACTIVE_CONNECTIONS.fetch_sub(1, Ordering::SeqCst);
+                // Connection is automatically returned to the pool
 
                 if let Err(e) = result {
                     let error_msg = format!("Failed to batch insert records: {}", e);
