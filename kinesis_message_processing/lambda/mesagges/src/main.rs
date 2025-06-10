@@ -67,56 +67,52 @@ impl SnowflakePool {
 
         // Use connection pooling - session is already pooled
         let session = self.client.create_session().await?;
-        let batch_size = get_env_usize("BATCH_SIZE", 100);
-        let timeout_ms = get_env_u64("TIMEOUT_MS", 95);
+        let batch_size = get_env_usize("BATCH_SIZE", 50);
+        let timeout_ms = get_env_u64("TIMEOUT_MS", 500);
 
-        for chunk in readings.chunks(batch_size) {
-            let chunk_start = std::time::Instant::now();
+        // Create a single large query for all records instead of chunking
+        // This reduces the number of round trips to Snowflake
+        let mut values = Vec::with_capacity(readings.len());
 
-            // Pre-allocate values vector with exact capacity
-            let mut values = Vec::with_capacity(chunk.len());
-            
-            // Build values for this chunk
-            for (reading, partition_key) in chunk {
-                let timestamp_seconds = reading.reading_timestamp / 1000.0;
+        for (reading, partition_key) in readings {
+            let timestamp_seconds = reading.reading_timestamp / 1000.0;
+            values.push(format!(
+                "({}, TO_TIMESTAMP_NTZ({}), {}, {}, {}, {}, '{}')",
+                reading.temperature,
+                timestamp_seconds,
+                reading.position.latitude,
+                reading.position.longitude,
+                reading.speed_kms,
+                reading.connection_speed_mbps,
+                partition_key
+            ));
+        }
 
-                values.push(format!(
-                    "({}, TO_TIMESTAMP_NTZ({}), {}, {}, {}, {}, '{}')",
-                    reading.temperature,
-                    timestamp_seconds,
-                    reading.position.latitude,
-                    reading.position.longitude,
-                    reading.speed_kms,
-                    reading.connection_speed_mbps,
-                    partition_key
-                ));
-            }
+        // Use multi-row insert syntax for better performance
+        let query = format!(
+            "INSERT INTO RUSTSTREAM.SENSOR_READINGS
+        (TEMPERATURE, READING_TIMESTAMP, LATITUDE, LONGITUDE, SPEED_KMS, CONNECTION_SPEED_MBPS, PARTITION_KEY)
+        VALUES {}",
+            values.join(", ")
+        );
 
-            // Use multi-row insert syntax for better performance
-            let query = format!(
-                "INSERT INTO RUSTSTREAM.SENSOR_READINGS
-                (TEMPERATURE, READING_TIMESTAMP, LATITUDE, LONGITUDE, SPEED_KMS, CONNECTION_SPEED_MBPS, PARTITION_KEY)
-                VALUES {}",
-                values.join(", ")
-            );
-
-            // Execute with timeout
-            let query_future = session.query(query);
-            match tokio::time::timeout(Duration::from_millis(timeout_ms), query_future).await {
-                Ok(result) => {
-                    match result {
-                        Ok(_) => {
-                            let elapsed = chunk_start.elapsed();
-                            tracing::info!("Inserted batch of {} records in {:.2?}", chunk.len(), elapsed);
-                        },
-                        Err(e) => return Err(Box::new(e)),
-                    }
-                },
-                Err(_) => {
-                    return Err("Query timeout exceeded".into());
+        // Execute with timeout
+        let query_future = session.query(query);
+        match tokio::time::timeout(Duration::from_millis(timeout_ms), query_future).await {
+            Ok(result) => {
+                match result {
+                    Ok(_) => {
+                        let elapsed = std::time::Instant::now().elapsed();
+                        tracing::info!("Inserted batch of {} records in {:.2?}", readings.len(), elapsed);
+                    },
+                    Err(e) => return Err(Box::new(e)),
                 }
+            },
+            Err(_) => {
+                return Err("Query timeout exceeded".into());
             }
         }
+
         Ok(())
     }
 }
