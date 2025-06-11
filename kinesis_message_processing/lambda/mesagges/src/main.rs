@@ -38,8 +38,8 @@ struct SnowflakePool {
 
 impl SnowflakePool {
     async fn new() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        let timeout_ms = get_env_u64("TIMEOUT_MS", 250);
-        let max_connections = get_env_usize("MAX_CONNECTIONS", 16);
+        let timeout_ms = get_env_u64("TIMEOUT_MS", 1000);
+        let max_connections = get_env_usize("MAX_CONNECTIONS", 20);
         let semaphore = Arc::new(Semaphore::new(max_connections));
 
 
@@ -107,10 +107,27 @@ impl SnowflakePool {
 
         // Get a session from the pool
         let session = self.get_session().await?;
-        let batch_size = get_env_usize("BATCH_SIZE", 25); // Reduced to optimize for sub-300ms latency
-        let timeout_ms = get_env_u64("TIMEOUT_MS", 250); // Reduced timeout
+        
+        // Dynamic batch sizing based on record volume
+        let min_batch_size = get_env_usize("MIN_BATCH_SIZE", 50);
+        let max_batch_size = get_env_usize("MAX_BATCH_SIZE", 2000);
+        let default_batch_size = get_env_usize("BATCH_SIZE", 200);
+        
+        // Calculate optimal batch size based on record volume
+        let record_count = readings.len();
+        let batch_size = if record_count < min_batch_size {
+            min_batch_size.min(record_count) // Use min_batch_size or record_count, whichever is smaller
+        } else if record_count > max_batch_size {
+            max_batch_size
+        } else {
+            // Scale batch size with record volume, but stay within bounds
+            (record_count / 10 * 10).max(min_batch_size).min(max_batch_size)
+        };
+        
+        let timeout_ms = get_env_u64("TIMEOUT_MS", 1000);
 
-        // Process in chunks based on batch size to avoid too large SQL statements
+        // Process in chunks based on dynamic batch size
+        tracing::info!("Using dynamic batch size of {} for {} records", batch_size, readings.len());
         for chunk in readings.chunks(batch_size) {
             // Build values for this chunk
             let mut values = Vec::with_capacity(chunk.len());
@@ -211,14 +228,14 @@ async fn function_handler(event: LambdaEvent<KinesisEvent>, pool: Arc<Mutex<Snow
 
         partition_groups
             .entry(partition_key.clone())
-            // Optimize for smaller batches with lower latency
-            .or_insert_with(|| Vec::with_capacity(25))
+            // Optimize for dynamic batch sizing
+            .or_insert_with(|| Vec::with_capacity(get_env_usize("BATCH_SIZE", 200)))
             .push((sequence_number, data, partition_key));
     }
 
     // Process each partition group in parallel with a semaphore to control concurrency
     let mut futures = Vec::with_capacity(partition_groups.len());
-    let max_connections = get_env_usize("MAX_CONNECTIONS", 16); // Increased for more parallelism
+    let max_connections = get_env_usize("MAX_CONNECTIONS", 20); // Updated to optimal value
     let semaphore = Arc::new(Semaphore::new(max_connections));
 
     for (partition_key, records) in partition_groups {
