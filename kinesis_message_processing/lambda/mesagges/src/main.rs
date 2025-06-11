@@ -195,6 +195,7 @@ struct RecordProcessingResult {
 
 async fn function_handler(event: LambdaEvent<KinesisEvent>, pool: Arc<Mutex<SnowflakePool>>) -> Result<(KinesisEventResponse, Vec<RecordProcessingResult>), Error> {
     let start_time = std::time::Instant::now();
+    let processing_start = std::time::Instant::now();
     
     // Pre-allocate with expected capacity
     let record_count = event.payload.records.len();
@@ -213,6 +214,7 @@ async fn function_handler(event: LambdaEvent<KinesisEvent>, pool: Arc<Mutex<Snow
     let mut partition_groups: HashMap<String, Vec<(String, &[u8], String)>> = HashMap::with_capacity(40);
 
     // First pass: group records by partition key and ensure we have sequence numbers
+    let grouping_start = std::time::Instant::now();
     for message in &event.payload.records {
         // Skip records without sequence numbers
         let sequence_number = match &message.kinesis.sequence_number {
@@ -232,6 +234,9 @@ async fn function_handler(event: LambdaEvent<KinesisEvent>, pool: Arc<Mutex<Snow
             .or_insert_with(|| Vec::with_capacity(get_env_usize("BATCH_SIZE", 200)))
             .push((sequence_number, data, partition_key));
     }
+    
+    let grouping_time = grouping_start.elapsed();
+    tracing::info!("Record grouping took {:?}", grouping_time);
 
     // Process each partition group in parallel with a semaphore to control concurrency
     let mut futures = Vec::with_capacity(partition_groups.len());
@@ -255,8 +260,15 @@ async fn function_handler(event: LambdaEvent<KinesisEvent>, pool: Arc<Mutex<Snow
 
             // Process records in this partition
             for (sequence_number, data, partition_key) in records {
+                // Measure binary data processing time
+                let start_unfold_binary = std::time::Instant::now();
+                
                 // Parse the data
                 let parse_result: Result<NewSensorReading, _> = from_slice(data);
+                
+                // Calculate elapsed time
+                let binary_processing_time = start_unfold_binary.elapsed();
+                tracing::info!("Binary data processing took {:?}", binary_processing_time);
 
                 match parse_result {
                     Ok(sensor_reading) => {
@@ -293,6 +305,10 @@ async fn function_handler(event: LambdaEvent<KinesisEvent>, pool: Arc<Mutex<Snow
 
             // Batch insert successful readings
             if !successful_readings.is_empty() {
+                // Track total binary processing time
+                let total_binary_time = std::time::Instant::now().elapsed();
+                tracing::info!("Total binary processing time before insert: {:?}", total_binary_time);
+                
                 let pool_guard = pool_clone_inner.lock().await;
                 let insert_start = std::time::Instant::now();
 
@@ -349,11 +365,13 @@ async fn function_handler(event: LambdaEvent<KinesisEvent>, pool: Arc<Mutex<Snow
     }
 
     let elapsed = start_time.elapsed();
+    let total_processing_time = processing_start.elapsed();
     tracing::info!(
-        "Processed {} records ({} failed) in {:.2?}",
+        "Processed {} records ({} failed) in {:.2?}, total processing time: {:.2?}",
         record_count,
         batch_item_failures.len(),
-        elapsed
+        elapsed,
+        total_processing_time
     );
 
     Ok((
