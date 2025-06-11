@@ -15,7 +15,7 @@ docker run -it -d --platform linux/arm64 -p 9000:8080 --env-file .env --name spa
 
 docker run -it -d -p 9000:8080 --name spark-rust "%name%:%v%"
 
-export v=22
+export v=28
 export name=kinesis-rust-snowflake-arm64
 export AWS_ACCOUNT=746669218362
 export AWS_REGION=us-east-1

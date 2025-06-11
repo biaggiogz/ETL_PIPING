@@ -38,8 +38,8 @@ struct SnowflakePool {
 
 impl SnowflakePool {
     async fn new() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        let timeout_ms = get_env_u64("TIMEOUT_MS", 95);
-        let max_connections = get_env_usize("MAX_CONNECTIONS", 6);
+        let timeout_ms = get_env_u64("TIMEOUT_MS", 250);
+        let max_connections = get_env_usize("MAX_CONNECTIONS", 16);
         let semaphore = Arc::new(Semaphore::new(max_connections));
 
 
@@ -57,10 +57,12 @@ impl SnowflakePool {
             config,
         )?;
 
-        // Pre-warm connections
+        // Pre-warm connections and set session parameters
         let mut sessions = Vec::with_capacity(max_connections);
         for _ in 0..max_connections {
             let session = Arc::new(client.create_session().await?);
+            // Set session parameters once when creating the connection
+            session.query("ALTER SESSION SET USE_CACHED_RESULT=FALSE").await?;
             session.query("SELECT 1").await?;
             sessions.push(session);
         }
@@ -83,6 +85,8 @@ impl SnowflakePool {
 
         // Create a new session if pool is empty
         let session = Arc::new(self.client.create_session().await?);
+        // Set session parameters for new connections too
+        session.query("ALTER SESSION SET USE_CACHED_RESULT=FALSE").await?;
         Ok(session)
     }
 
@@ -103,8 +107,8 @@ impl SnowflakePool {
 
         // Get a session from the pool
         let session = self.get_session().await?;
-        let batch_size = get_env_usize("BATCH_SIZE", 50);
-        let timeout_ms = get_env_u64("TIMEOUT_MS", 500);
+        let batch_size = get_env_usize("BATCH_SIZE", 25); // Reduced to optimize for sub-300ms latency
+        let timeout_ms = get_env_u64("TIMEOUT_MS", 250); // Reduced timeout
 
         // Process in chunks based on batch size to avoid too large SQL statements
         for chunk in readings.chunks(batch_size) {
@@ -124,17 +128,18 @@ impl SnowflakePool {
             ));
         }
 
-        // Use multi-row insert syntax for better performance
+        // Use multi-row insert syntax with performance optimizations
         let query = format!(
-            "INSERT INTO RUSTSTREAM.SENSOR_READINGS
-        (TEMPERATURE, READING_TIMESTAMP, LATITUDE, LONGITUDE, SPEED_KMS, CONNECTION_SPEED_MBPS, PARTITION_KEY)
-        VALUES {}",
+            "INSERT /*+ PARALLEL(8) ENABLE_PARALLEL_DML */ INTO RUSTSTREAM.SENSOR_READINGS
+            (TEMPERATURE, READING_TIMESTAMP, LATITUDE, LONGITUDE, SPEED_KMS, CONNECTION_SPEED_MBPS, PARTITION_KEY)
+            VALUES {}",
             values.join(", ")
         );
 
-        // Execute with timeout and proper timing
+        // Execute with timeout and proper timing - optimize for low latency
         let chunk_start = std::time::Instant::now();
         let query_future = session.query(query);
+        
         let result = match tokio::time::timeout(Duration::from_millis(timeout_ms), query_future).await {
             Ok(result) => {
                 match result {
@@ -187,7 +192,8 @@ async fn function_handler(event: LambdaEvent<KinesisEvent>, pool: Arc<Mutex<Snow
     }
 
     // Group records by partition key for more efficient processing
-    let mut partition_groups: HashMap<String, Vec<(String, &[u8], String)>> = HashMap::with_capacity(16);
+    // Increased capacity to support 20-40 groups
+    let mut partition_groups: HashMap<String, Vec<(String, &[u8], String)>> = HashMap::with_capacity(40);
 
     // First pass: group records by partition key and ensure we have sequence numbers
     for message in &event.payload.records {
@@ -205,13 +211,14 @@ async fn function_handler(event: LambdaEvent<KinesisEvent>, pool: Arc<Mutex<Snow
 
         partition_groups
             .entry(partition_key.clone())
-            .or_insert_with(|| Vec::with_capacity(record_count / 8))
+            // Optimize for smaller batches with lower latency
+            .or_insert_with(|| Vec::with_capacity(25))
             .push((sequence_number, data, partition_key));
     }
 
     // Process each partition group in parallel with a semaphore to control concurrency
     let mut futures = Vec::with_capacity(partition_groups.len());
-    let max_connections = get_env_usize("MAX_CONNECTIONS", 6);
+    let max_connections = get_env_usize("MAX_CONNECTIONS", 16); // Increased for more parallelism
     let semaphore = Arc::new(Semaphore::new(max_connections));
 
     for (partition_key, records) in partition_groups {
