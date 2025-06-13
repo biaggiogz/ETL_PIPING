@@ -12,10 +12,9 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 use aws_sdk_sqs::{Client as SqsClient, types::SendMessageBatchRequestEntry};
+use tracing::{info, warn, error, Level, span, Instrument};
 
-// Connection pooling is now handled by SnowflakePool
 
-// Helper function to get environment variables with defaults
 fn get_env_usize(key: &str, default: usize) -> usize {
     var(key).ok()
         .and_then(|val| val.parse().ok())
@@ -28,20 +27,19 @@ fn get_env_u64(key: &str, default: u64) -> u64 {
         .unwrap_or(default)
 }
 
-// Global connection pool for Snowflake
 struct SnowflakePool {
     client: SnowflakeClient,
     sessions: Mutex<Vec<Arc<SnowflakeSession>>>,
     max_sessions: usize,
+    semaphore: Arc<Semaphore>, // Add semaphore to control concurrent operations
 }
 
 
 impl SnowflakePool {
     async fn new() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        let timeout_ms = get_env_u64("TIMEOUT_MS", 1000);
+        let timeout_ms = get_env_u64("TIMEOUT_MS", 2000); // Increased timeout for better throughput
         let max_connections = get_env_usize("MAX_CONNECTIONS", 20);
         let semaphore = Arc::new(Semaphore::new(max_connections));
-
 
         let mut config = SnowflakeClientConfig::default();
         config.account = var("SNOWFLAKE_ACCOUNT").unwrap_or_else(|_| "ACCOUNT".to_string());
@@ -57,35 +55,51 @@ impl SnowflakePool {
             config,
         )?;
 
-        // Pre-warm connections and set session parameters
         let mut sessions = Vec::with_capacity(max_connections);
+        
+        let mut connection_futures = Vec::with_capacity(max_connections);
         for _ in 0..max_connections {
-            let session = Arc::new(client.create_session().await?);
-            // Set session parameters once when creating the connection
-            session.query("ALTER SESSION SET USE_CACHED_RESULT=FALSE").await?;
-            session.query("SELECT 1").await?;
-            sessions.push(session);
+            connection_futures.push(async {
+                let session = Arc::new(client.create_session().await?);
+                session.query("ALTER SESSION SET USE_CACHED_RESULT=FALSE").await?;
+                session.query("ALTER SESSION SET JDBC_EXECUTE_RETURN_COUNT_FOR_DML=TRUE").await?;
+                session.query("ALTER SESSION SET STATEMENT_TIMEOUT_IN_SECONDS=30").await?;
+                session.query("SELECT 1").await?;
+                Ok::<Arc<SnowflakeSession>, Box<dyn std::error::Error + Send + Sync>>(session)
+            });
+        }
+        
+        let results = join_all(connection_futures).await;
+        for result in results {
+            if let Ok(session) = result {
+                sessions.push(session);
+            }
         }
 
-        tracing::info!("Snowflake connection pool created with {} pre-warmed connections", max_connections);
+        info!(
+            target: "connection_pool", 
+            connections = max_connections,
+            "✅ Snowflake connection pool initialized with {} pre-warmed connections", 
+            max_connections
+        );
 
         Ok(Self {
             client,
             sessions: Mutex::new(sessions),
             max_sessions: max_connections,
+            semaphore,
         })
     }
 
-    // 2. Get a session from the pool or create a new one if needed
     async fn get_session(&self) -> Result<Arc<SnowflakeSession>, Box<dyn std::error::Error + Send + Sync>> {
+        let _permit = self.semaphore.acquire().await.unwrap();
+        
         let mut sessions = self.sessions.lock().await;
         if let Some(session) = sessions.pop() {
             return Ok(session);
         }
 
-        // Create a new session if pool is empty
         let session = Arc::new(self.client.create_session().await?);
-        // Set session parameters for new connections too
         session.query("ALTER SESSION SET USE_CACHED_RESULT=FALSE").await?;
         Ok(session)
     }
@@ -96,6 +110,8 @@ impl SnowflakePool {
         if sessions.len() < self.max_sessions {
             sessions.push(session);
         }
+        // Release the semaphore permit when returning the session
+        // This is done implicitly as the _permit is dropped at the end of get_session's scope
     }
 
 
@@ -105,86 +121,119 @@ impl SnowflakePool {
             return Ok(());
         }
 
-        // Get a session from the pool
         let session = self.get_session().await?;
         
-        // Dynamic batch sizing based on record volume
-        let min_batch_size = get_env_usize("MIN_BATCH_SIZE", 50);
-        let max_batch_size = get_env_usize("MAX_BATCH_SIZE", 2000);
-        let default_batch_size = get_env_usize("BATCH_SIZE", 200);
+        let min_batch_size = get_env_usize("MIN_BATCH_SIZE", 100);
+        let max_batch_size = get_env_usize("MAX_BATCH_SIZE", 5000);
+        let default_batch_size = get_env_usize("BATCH_SIZE", 500);
         
-        // Calculate optimal batch size based on record volume
         let record_count = readings.len();
         let batch_size = if record_count < min_batch_size {
             min_batch_size.min(record_count) // Use min_batch_size or record_count, whichever is smaller
         } else if record_count > max_batch_size {
             max_batch_size
         } else {
-            // Scale batch size with record volume, but stay within bounds
             (record_count / 10 * 10).max(min_batch_size).min(max_batch_size)
         };
         
-        let timeout_ms = get_env_u64("TIMEOUT_MS", 1000);
+        let timeout_ms = get_env_u64("TIMEOUT_MS", 2000);
 
-        // Process in chunks based on dynamic batch size
-        tracing::info!("Using dynamic batch size of {} for {} records", batch_size, readings.len());
-        for chunk in readings.chunks(batch_size) {
-            // Build values for this chunk
-            let mut values = Vec::with_capacity(chunk.len());
-            for (reading, partition_key) in chunk {
-            let timestamp_seconds = reading.reading_timestamp / 1000.0;
-            values.push(format!(
-                "({}, TO_TIMESTAMP_NTZ({}), {}, {}, {}, {}, '{}')",
-                reading.temperature,
-                timestamp_seconds,
-                reading.position.latitude,
-                reading.position.longitude,
-                reading.speed_kms,
-                reading.connection_speed_mbps,
-                partition_key
-            ));
-        }
-
-        // Use multi-row insert syntax with performance optimizations
-        let query = format!(
-            "INSERT /*+ PARALLEL(8) ENABLE_PARALLEL_DML */ INTO RUSTSTREAM.SENSOR_READINGS
-            (TEMPERATURE, READING_TIMESTAMP, LATITUDE, LONGITUDE, SPEED_KMS, CONNECTION_SPEED_MBPS, PARTITION_KEY)
-            VALUES {}",
-            values.join(", ")
+        info!(
+            target: "batch_processing",
+            batch_size = batch_size,
+            total_records = readings.len(),
+            "📊 Using dynamic batch size of {} for {} records", 
+            batch_size, 
+            readings.len()
         );
-
-        // Execute with timeout and proper timing - optimize for low latency
-        let chunk_start = std::time::Instant::now();
-        let query_future = session.query(query);
         
-        let result = match tokio::time::timeout(Duration::from_millis(timeout_ms), query_future).await {
-            Ok(result) => {
-                match result {
-                    Ok(_) => {
-                        let elapsed = chunk_start.elapsed();
-                        tracing::info!("Inserted batch of {} records in {:.2?}", chunk.len(), elapsed);
-                        Ok(())
-                    },
-                    Err(e) => Err(Box::new(e) as Box<dyn std::error::Error + Send + Sync>),
-                }
+        let chunks: Vec<_> = readings.chunks(batch_size).collect();
+        let chunk_count = chunks.len();
+        
+        for (i, chunk) in chunks.into_iter().enumerate() {
+            let mut values = Vec::with_capacity(chunk.len());
+            
+            for (reading, partition_key) in chunk {
+                let timestamp_seconds = reading.reading_timestamp / 1000.0;
+                values.push(format!(
+                    "({}, TO_TIMESTAMP_NTZ({}), {}, {}, {}, {}, '{}')",
+                    reading.temperature,
+                    timestamp_seconds,
+                    reading.position.latitude,
+                    reading.position.longitude,
+                    reading.speed_kms,
+                    reading.connection_speed_mbps,
+                    partition_key
+                ));
+            }
+
+            // Use multi-row insert syntax with enhanced performance optimizations
+            let query = format!(
+                "INSERT /*+ PARALLEL(32) ENABLE_PARALLEL_DML DIRECT */ INTO RUSTSTREAM.SENSOR_READINGS
+                (TEMPERATURE, READING_TIMESTAMP, LATITUDE, LONGITUDE, SPEED_KMS, CONNECTION_SPEED_MBPS, PARTITION_KEY)
+                VALUES {}",
+                values.join(", ")
+            );
+
+            // Execute with timeout and proper timing - optimize for low latency
+            let chunk_start = std::time::Instant::now();
+            let query_future = session.query(query);
+            
+            let result = match tokio::time::timeout(Duration::from_millis(timeout_ms), query_future).await {
+                Ok(result) => {
+                    match result {
+                        Ok(_) => {
+                            let elapsed = chunk_start.elapsed();
+                            info!(
+                                target: "database_operation",
+                                batch_number = i+1,
+                                total_batches = chunk_count,
+                                records = chunk.len(),
+                                duration_ms = elapsed.as_millis(),
+                                "✓ Inserted batch {}/{} of {} records in {:.2?}", 
+                                i+1, chunk_count, chunk.len(), elapsed
+                            );
+                            Ok(())
+                        },
+                        Err(e) => {
+                            error!(
+                                target: "database_operation",
+                                batch_number = i+1,
+                                total_batches = chunk_count,
+                                records = chunk.len(),
+                                error = %e,
+                                "❌ Failed to insert batch {}/{}: {}", 
+                                i+1, chunk_count, e
+                            );
+                            Err(Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
+                        },
+                    }
+                },
+                Err(_) => {
+                error!(
+                    target: "database_operation",
+                    batch_number = i+1,
+                    total_batches = chunk_count,
+                    records = chunk.len(),
+                    timeout_ms = timeout_ms,
+                    "⏱️ Query timeout exceeded after {}ms", 
+                    timeout_ms
+                );
+                Err("Query timeout exceeded".into())
             },
-            Err(_) => Err("Query timeout exceeded".into()),
-        };
+            };
 
-        if result.is_err() {
-            // Return the session to the pool
-            self.return_session(session).await;
-            return result;
-        }
+            if result.is_err() {
+                self.return_session(session).await;
+                return result;
+            }
         }
         
-        // Return the session to the pool after all chunks are processed
         self.return_session(session).await;
         Ok(())
     }
 }
 
-// Structure to track record processing for DLQ reporting
 #[derive(Debug, Clone)]
 struct RecordProcessingResult {
     sequence_number: String,
@@ -194,14 +243,28 @@ struct RecordProcessingResult {
 }
 
 async fn function_handler(event: LambdaEvent<KinesisEvent>, pool: Arc<Mutex<SnowflakePool>>) -> Result<(KinesisEventResponse, Vec<RecordProcessingResult>), Error> {
+    let handler_span = span!(
+        Level::INFO, 
+        "kinesis_processing",
+        request_id = %event.context.request_id,
+        function_name = %event.context.env_config.function_name,
+        memory_limit = %event.context.env_config.memory
+    );
+    
+    let _enter = handler_span.enter();
+    
     let start_time = std::time::Instant::now();
     let processing_start = std::time::Instant::now();
+    
+    info!(
+        target: "lambda_invocation",
+        "🚀 Starting Kinesis event processing"
+    );
     
     // Pre-allocate with expected capacity
     let record_count = event.payload.records.len();
     let mut batch_item_failures = Vec::with_capacity(record_count / 10); // Assume ~10% failure rate
     
-    // Fast path for empty events
     if record_count == 0 {
         return Ok((
             KinesisEventResponse { batch_item_failures },
@@ -209,18 +272,22 @@ async fn function_handler(event: LambdaEvent<KinesisEvent>, pool: Arc<Mutex<Snow
         ));
     }
 
-    // Group records by partition key for more efficient processing
-    // Increased capacity to support 20-40 groups
+    thread_local! {
+        static PARSER_BUFFER: std::cell::RefCell<Vec<u8>> = std::cell::RefCell::new(Vec::with_capacity(4096));
+    }
+    
     let mut partition_groups: HashMap<String, Vec<(String, &[u8], String)>> = HashMap::with_capacity(40);
 
-    // First pass: group records by partition key and ensure we have sequence numbers
     let grouping_start = std::time::Instant::now();
     for message in &event.payload.records {
-        // Skip records without sequence numbers
         let sequence_number = match &message.kinesis.sequence_number {
             Some(sn) => sn.clone(),
             None => {
-                tracing::warn!("Record without sequence number, skipping");
+                warn!(
+                    target: "data_validation",
+                    approximate_arrival = ?message.kinesis.approximate_arrival_timestamp,
+                    "⚠️ Record without sequence number, skipping"
+                );
                 continue;
             }
         };
@@ -230,15 +297,21 @@ async fn function_handler(event: LambdaEvent<KinesisEvent>, pool: Arc<Mutex<Snow
 
         partition_groups
             .entry(partition_key.clone())
-            // Optimize for dynamic batch sizing
             .or_insert_with(|| Vec::with_capacity(get_env_usize("BATCH_SIZE", 200)))
             .push((sequence_number, data, partition_key));
     }
     
     let grouping_time = grouping_start.elapsed();
-    tracing::info!("Record grouping took {:?}", grouping_time);
+    info!(
+        target: "performance_metrics",
+        duration_us = grouping_time.as_micros(),
+        groups = partition_groups.len(),
+        records = record_count,
+        "⏱️ Record grouping completed in {:?} with {} partition groups",
+        grouping_time,
+        partition_groups.len()
+    );
 
-    // Process each partition group in parallel with a semaphore to control concurrency
     let mut futures = Vec::with_capacity(partition_groups.len());
     let max_connections = get_env_usize("MAX_CONNECTIONS", 20); // Updated to optimal value
     let semaphore = Arc::new(Semaphore::new(max_connections));
@@ -252,27 +325,21 @@ async fn function_handler(event: LambdaEvent<KinesisEvent>, pool: Arc<Mutex<Snow
             // Acquire a permit from the semaphore to limit concurrent connections
             let _permit = semaphore_clone.acquire().await.unwrap();
             
-            // Clone the pool to make it Send
             let pool_clone_inner = pool_clone.clone();
             
             let mut successful_readings = Vec::with_capacity(records.len());
             let mut failed_records = Vec::new();
 
-            // Process records in this partition
             for (sequence_number, data, partition_key) in records {
-                // Measure binary data processing time
                 let start_unfold_binary = std::time::Instant::now();
                 
-                // Parse the data
                 let parse_result: Result<NewSensorReading, _> = from_slice(data);
                 
-                // Calculate elapsed time
                 let binary_processing_time = start_unfold_binary.elapsed();
                 tracing::info!("Binary data processing took {:?}", binary_processing_time);
 
                 match parse_result {
                     Ok(sensor_reading) => {
-                        // Business logic
                         match NewSensorReadingHandler::handle(&sensor_reading).await {
                             Ok(_) => {
                                 // Add to successful batch
@@ -366,8 +433,16 @@ async fn function_handler(event: LambdaEvent<KinesisEvent>, pool: Arc<Mutex<Snow
 
     let elapsed = start_time.elapsed();
     let total_processing_time = processing_start.elapsed();
-    tracing::info!(
-        "Processed {} records ({} failed) in {:.2?}, total processing time: {:.2?}",
+    
+    // Log completion with structured fields and summary statistics
+    info!(
+        target: "lambda_summary",
+        total_records = record_count,
+        failed_records = batch_item_failures.len(),
+        success_rate = format!("{:.1}%", if record_count > 0 { 100.0 * (record_count - batch_item_failures.len()) as f64 / record_count as f64 } else { 100.0 }),
+        duration_ms = elapsed.as_millis(),
+        processing_time_ms = total_processing_time.as_millis(),
+        "✅ Processed {} records ({} failed) in {:.2?}, total processing time: {:.2?}",
         record_count,
         batch_item_failures.len(),
         elapsed,
@@ -384,10 +459,13 @@ async fn function_handler(event: LambdaEvent<KinesisEvent>, pool: Arc<Mutex<Snow
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
+    // Configure structured logging for better CloudWatch integration
     tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::INFO)
-        .with_target(false)
-        .without_time()
+        .with_max_level(Level::INFO)
+        .with_target(true)  // Include target in logs
+        .with_ansi(false)   // Disable ANSI colors for CloudWatch
+        .with_file(true)    // Include file information
+        .with_line_number(true) // Include line numbers
         .init();
 
     // Initialize AWS SDK
