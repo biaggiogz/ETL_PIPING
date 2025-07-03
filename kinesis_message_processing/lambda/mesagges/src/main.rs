@@ -9,10 +9,17 @@ use serde_json::from_slice;
 use tokio::sync::{Mutex, Semaphore};
 use futures::future::{join_all, FutureExt};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicUsize, Ordering};
+
 use std::time::Duration;
 use aws_sdk_sqs::{Client as SqsClient, types::SendMessageBatchRequestEntry};
-use tracing::{info, warn, error, Level, span, Instrument};
+use aws_sdk_dynamodb::Client as DynamoClient;
+use tracing::{info, warn, error, Level, span};
+
+mod cache;
+mod cache_processor;
+
+use cache::DynamoCache;
+use cache_processor::CacheProcessor;
 
 
 fn get_env_usize(key: &str, default: usize) -> usize {
@@ -125,7 +132,7 @@ impl SnowflakePool {
         
         let min_batch_size = get_env_usize("MIN_BATCH_SIZE", 100);
         let max_batch_size = get_env_usize("MAX_BATCH_SIZE", 5000);
-        let default_batch_size = get_env_usize("BATCH_SIZE", 500);
+        let _default_batch_size = get_env_usize("BATCH_SIZE", 500);
         
         let record_count = readings.len();
         let batch_size = if record_count < min_batch_size {
@@ -242,7 +249,7 @@ struct RecordProcessingResult {
     error: Option<String>,
 }
 
-async fn function_handler(event: LambdaEvent<KinesisEvent>, pool: Arc<Mutex<SnowflakePool>>) -> Result<(KinesisEventResponse, Vec<RecordProcessingResult>), Error> {
+async fn function_handler(event: LambdaEvent<KinesisEvent>, pool: Arc<Mutex<SnowflakePool>>, cache: Arc<DynamoCache>) -> Result<(KinesisEventResponse, Vec<RecordProcessingResult>), Error> {
     let handler_span = span!(
         Level::INFO, 
         "kinesis_processing",
@@ -317,7 +324,8 @@ async fn function_handler(event: LambdaEvent<KinesisEvent>, pool: Arc<Mutex<Snow
     let semaphore = Arc::new(Semaphore::new(max_connections));
 
     for (partition_key, records) in partition_groups {
-        let pool_clone = Arc::clone(&pool);
+        let _pool_clone = Arc::clone(&pool);
+        let cache_clone = Arc::clone(&cache);
         let semaphore_clone = Arc::clone(&semaphore);
         let partition_key_clone = partition_key;
 
@@ -325,9 +333,6 @@ async fn function_handler(event: LambdaEvent<KinesisEvent>, pool: Arc<Mutex<Snow
             // Acquire a permit from the semaphore to limit concurrent connections
             let _permit = semaphore_clone.acquire().await.unwrap();
             
-            let pool_clone_inner = pool_clone.clone();
-            
-            let mut successful_readings = Vec::with_capacity(records.len());
             let mut failed_records = Vec::new();
 
             for (sequence_number, data, partition_key) in records {
@@ -342,8 +347,20 @@ async fn function_handler(event: LambdaEvent<KinesisEvent>, pool: Arc<Mutex<Snow
                     Ok(sensor_reading) => {
                         match NewSensorReadingHandler::handle(&sensor_reading).await {
                             Ok(_) => {
-                                // Add to successful batch
-                                successful_readings.push((sensor_reading, partition_key));
+                                // Cache the reading instead of adding to batch for immediate persistence
+                                if let Err(e) = cache_clone.cache_reading(&sensor_reading, &partition_key).await {
+                                    let error_msg = format!("Failed to cache reading: {:?}", e);
+                                    tracing::warn!("{} with sequence number: {}", error_msg, sequence_number);
+                                    failed_records.push(RecordProcessingResult {
+                                        sequence_number,
+                                        partition_key,
+                                        data: data.to_vec(),
+                                        error: Some(error_msg),
+                                    });
+                                } else {
+                                    // Successfully cached
+                                    tracing::info!("✓ Cached reading for partition {}", partition_key);
+                                }
                             },
                             Err(e) => {
                                 let error_msg = format!("Business logic rejected reading: {:?}", e);
@@ -370,46 +387,12 @@ async fn function_handler(event: LambdaEvent<KinesisEvent>, pool: Arc<Mutex<Snow
                 }
             }
 
-            // Batch insert successful readings
-            if !successful_readings.is_empty() {
-                // Track total binary processing time
-                let total_binary_time = std::time::Instant::now().elapsed();
-                tracing::info!("Total binary processing time before insert: {:?}", total_binary_time);
-                
-                let pool_guard = pool_clone_inner.lock().await;
-                let insert_start = std::time::Instant::now();
-
-                let result = pool_guard.batch_insert(&successful_readings).await;
-
-                // Connection is automatically returned to the pool
-
-                if let Err(e) = result {
-                    let error_msg = format!("Failed to batch insert records: {}", e);
-                    tracing::error!("{}", error_msg);
-                    
-                    // Mark all records in this batch as failed
-                    for (reading, partition_key) in successful_readings {
-                        // We need to reconstruct the original data since we don't have it anymore
-                        // This is a best-effort approach to ensure records go to DLQ
-                        let data = serde_json::to_vec(&reading).unwrap_or_else(|_| Vec::new());
-                        
-                        // Generate a placeholder sequence number since we lost the original
-                        // The important part is that we report the failure to the Lambda service
-                        let seq_num = format!("batch-failure-{}", reading.reading_timestamp);
-                        
-                        failed_records.push(RecordProcessingResult {
-                            sequence_number: seq_num,
-                            partition_key,
-                            data,
-                            error: Some(error_msg.clone()),
-                        });
-                    }
-                } else {
-                    let elapsed = insert_start.elapsed();
-                    tracing::info!("Batch insert for partition {} completed in {:.2?}",
-                                  partition_key_clone, elapsed);
-                }
-            }
+            // No immediate batch insert - data is now cached and will be processed by background task
+            let total_binary_time = std::time::Instant::now().elapsed();
+            tracing::info!("Total binary processing time before caching: {:?}", total_binary_time);
+            
+            tracing::info!("Partition {} processing completed - {} failed records",
+                          partition_key_clone, failed_records.len());
 
             failed_records
         };
@@ -471,6 +454,7 @@ async fn main() -> Result<(), Error> {
     // Initialize AWS SDK
     let config = aws_config::load_from_env().await;
     let sqs_client = SqsClient::new(&config);
+    let dynamo_client = DynamoClient::new(&config);
     
     // Get DLQ URL from environment variable
     let dlq_url = var("DLQ_URL").unwrap_or_else(|_| {
@@ -490,14 +474,27 @@ async fn main() -> Result<(), Error> {
         }
     };
 
-    // Create a closure that captures the pool and SQS client
+    // Initialize DynamoDB cache
+    let cache = Arc::new(DynamoCache::new(dynamo_client));
+    
+    // Initialize and start cache processor
+    let cache_processor = CacheProcessor::new(Arc::clone(&cache), Arc::clone(&pool));
+    let cache_clone = Arc::clone(&cache);
+    
+    // Start background cache processing task
+    tokio::spawn(async move {
+        cache_processor.start_background_processing().await;
+    });
+
+    // Create a closure that captures the pool, cache, and SQS client
     let handler_func = move |event: LambdaEvent<KinesisEvent>| {
         let pool_clone = Arc::clone(&pool);
+        let cache_clone = Arc::clone(&cache_clone);
         let sqs_client_clone = sqs_client.clone();
         let dlq_url_clone = dlq_url.clone();
         
         async move { 
-            let (response, failed_records) = function_handler(event, pool_clone).await?;
+            let (response, failed_records) = function_handler(event, pool_clone, cache_clone).await?;
             
             // Send failed records to DLQ if URL is provided
             if !dlq_url_clone.is_empty() && !failed_records.is_empty() {

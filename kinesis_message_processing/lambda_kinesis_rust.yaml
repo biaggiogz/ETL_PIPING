@@ -49,6 +49,18 @@ Parameters:
   TimeoutMS:
     Type: Number
     Default: 100
+  CacheTableName:
+    Type: String
+    Default: sensor_readings_cache
+    Description: "DynamoDB cache table name"
+  CacheTTLSeconds:
+    Type: Number
+    Default: 60
+    Description: "Cache TTL in seconds"
+  CacheCheckIntervalSeconds:
+    Type: Number
+    Default: 60
+    Description: "Cache check interval in seconds"
 
 Resources:
   SensorReadingQueue:
@@ -124,6 +136,18 @@ Resources:
                 Action:
                   - sqs:SendMessage
                 Resource: !GetAtt FailedSensorReadingDLQ.Arn
+        - PolicyName: DynamoDBAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:GetItem
+                  - dynamodb:Scan
+                  - dynamodb:BatchWriteItem
+                  - dynamodb:DeleteItem
+                Resource: !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${CacheTableName}'
 
   MessageStream:
     Type: AWS::Kinesis::Stream
@@ -162,6 +186,9 @@ Resources:
           MIN_BATCH_SIZE: !Ref MinBatchsize
           TIMEOUT_MS: !Ref TimeoutMS
           DLQ_URL: !Ref FailedSensorReadingDLQ
+          CACHE_TABLE_NAME: !Ref CacheTableName
+          CACHE_TTL_SECONDS: !Ref CacheTTLSeconds
+          CACHE_CHECK_INTERVAL_SECONDS: !Ref CacheCheckIntervalSeconds
       EventInvokeConfig:
         MaximumRetryAttempts: 2
         MaximumEventAgeInSeconds: 300

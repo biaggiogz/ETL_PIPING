@@ -317,6 +317,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "aws-sdk-dynamodb"
+version = "0.28.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "80e69ffb50ec065a564769aa61158be806b66a7d77301a3459d1c663a421eaab"
+dependencies = [
+ "aws-credential-types 0.55.3",
+ "aws-endpoint",
+ "aws-http",
+ "aws-sig-auth",
+ "aws-smithy-async 0.55.3",
+ "aws-smithy-client",
+ "aws-smithy-http 0.55.3",
+ "aws-smithy-http-tower",
+ "aws-smithy-json 0.55.3",
+ "aws-smithy-types 0.55.3",
+ "aws-types 0.55.3",
+ "bytes",
+ "fastrand 1.9.0",
+ "http 0.2.12",
+ "regex",
+ "tokio-stream",
+ "tower 0.4.13",
+ "tracing",
+]
+
+[[package]]
 name = "aws-sdk-kinesis"
 version = "1.76.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2045,6 +2071,7 @@ name = "kinesis-lambda"
 version = "0.1.0"
 dependencies = [
  "aws-config 0.55.3",
+ "aws-sdk-dynamodb",
  "aws-sdk-sqs",
  "aws_lambda_events 0.8.5",
  "base64 0.13.1",

@@ -1,0 +1,38 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'DynamoDB Cache Table for Sensor Readings'
+
+Resources:
+  SensorReadingsCache:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: sensor_readings_cache
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: cache_key
+          AttributeType: S
+      KeySchema:
+        - AttributeName: cache_key
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: expire_at
+        Enabled: true
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      Tags:
+        - Key: Purpose
+          Value: SensorDataCache
+        - Key: Environment
+          Value: Production
+
+Outputs:
+  CacheTableName:
+    Description: 'Name of the DynamoDB cache table'
+    Value: !Ref SensorReadingsCache
+    Export:
+      Name: !Sub '${AWS::StackName}-CacheTableName'
+  
+  CacheTableArn:
+    Description: 'ARN of the DynamoDB cache table'
+    Value: !GetAtt SensorReadingsCache.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-CacheTableArn'

@@ -1,6 +1,7 @@
 For some reason if I increase the timeout, more
 records are processing
 
+# Snowflake Configuration
 BATCH_SIZE=200
 MAX_BATCH_SIZE=2000
 MAX_CONNECTIONS=20
@@ -15,5 +16,13 @@ SNOWFLAKE_SCHEMA=RUSTSTREAM
 SNOWFLAKE_TABLE=SENSOR_READINGS
 SNOWFLAKE_USERNAME=RUSTSPARK
 SNOWFLAKE_WAREHOUSE=COMPUTE_WH
+
+# DynamoDB Cache Configuration
+CACHE_TABLE_NAME=sensor_readings_cache
+CACHE_TTL_SECONDS=60
+CACHE_CHECK_INTERVAL_SECONDS=60
+
+# DLQ Configuration
+DLQ_URL=https://sqs.region.amazonaws.com/account/dlq-name
 
 
