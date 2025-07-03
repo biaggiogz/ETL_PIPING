@@ -5,8 +5,9 @@ Description: |
   This table supports independent 1-minute caching per sensor:
   - Each sensor (device1, device2, etc.) maintains its own cache entries
   - TTL expires readings exactly 1 minute after creation
-  - Supports unlimited number of sensors
+  - Supports unlimited number of sensors with independent lifecycles
   - Optimized for real-time WebSocket access and batch processing
+  - Nanosecond precision timestamps for microsecond-level latency tracking
 
 Resources:
   SensorReadingsCache:
@@ -36,6 +37,8 @@ Resources:
           Value: Production
         - Key: CacheStrategy
           Value: PerSensorIndependentTTL
+        - Key: Precision
+          Value: NanosecondTimestamps
 
 Outputs:
   CacheTableName:

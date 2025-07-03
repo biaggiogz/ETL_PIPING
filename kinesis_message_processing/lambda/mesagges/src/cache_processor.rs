@@ -31,7 +31,7 @@ impl CacheProcessor {
         info!(
             target: "cache_processor",
             interval_seconds = self.check_interval_seconds,
-            "🔄 Starting cache processor with {}s interval (1 minute)", self.check_interval_seconds
+            "🔄 Starting per-sensor independent cache processor with {}s interval", self.check_interval_seconds
         );
 
         loop {
@@ -60,7 +60,7 @@ impl CacheProcessor {
         info!(
             target: "cache_processor",
             expired_count = expired_readings.len(),
-            "📦 Processing {} expired cache entries", expired_readings.len()
+            "📦 Processing {} expired cache entries from per-sensor independent TTL", expired_readings.len()
         );
 
         // Persist to Snowflake
@@ -84,7 +84,7 @@ impl CacheProcessor {
                     target: "cache_processor",
                     processed_count = expired_readings.len(),
                     duration_ms = elapsed.as_millis(),
-                    "✅ Successfully processed {} expired cache entries in {:.2?}", 
+                    "✅ Successfully processed {} expired per-sensor cache entries in {:.2?}", 
                     expired_readings.len(), elapsed
                 );
             }
