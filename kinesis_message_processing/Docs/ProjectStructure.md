@@ -3,11 +3,13 @@
 ## Overview
 This project implements a production-ready, serverless sensor data processing pipeline using Rust Lambda functions with **per-sensor independent 1-minute DynamoDB caching** for real-time data access and efficient batch persistence to Snowflake.
 
-## Architecture Pattern
+## Architecture Pattern (Current Implementation)
 ```
 KINESIS → RUST LAMBDA → [DynamoDB Cache - 1 min per sensor] → Background Task → Snowflake
                               ↓
-                         WebSocket Ready (Future)
+                         WebSocket API Gateway → Real-time Clients
+                              ↓
+                    Microsecond Precision Streaming
 ```
 
 ## Project Structure
@@ -20,14 +22,19 @@ kinesis_message_processing/
 │   │   ├── 📄 Cargo.lock              # Dependency lock file
 │   │   └── 📁 src/
 │   │       ├── 📄 main.rs             # Lambda handler with cache integration
-│   │       ├── 📄 cache.rs            # DynamoDB cache operations
+│   │       ├── 📄 cache.rs            # DynamoDB cache operations with WebSocket notifications
 │   │       └── 📄 cache_processor.rs  # Background expired data processing
+│   │
+│   ├── 📁 websocket/                   # WebSocket Lambda function
+│   │   ├── 📄 Cargo.toml              # WebSocket dependencies
+│   │   └── 📁 src/
+│   │       └── 📄 main.rs             # WebSocket handler with microsecond precision
 │   │
 │   └── 📁 shared/                      # Shared library
 │       ├── 📄 Cargo.toml              # Shared dependencies
 │       ├── 📄 Cargo.lock              # Dependency lock file
 │       └── 📁 src/
-│           └── 📄 lib.rs              # Sensor reading types & validation
+│           └── 📄 lib.rs              # Sensor reading types & validation with precision timestamps
 │
 ├── 📁 test/                           # Test utilities
 │   ├── 📄 Cargo.toml                 # Test dependencies
@@ -35,12 +42,13 @@ kinesis_message_processing/
 │       └── 📄 main.rs                # Kinesis & Snowflake test client
 │
 ├── 📁 Docs/                          # Documentation
-│   ├── 📄 README.md                  # Project overview
 │   ├── 📄 IMPLEMENTATION_SUMMARY.md  # Technical implementation details
 │   ├── 📄 PROJECT_DOCUMENTATION.md   # Comprehensive documentation
+│   ├── 📄 ProjectStructure.md        # Project structure overview
 │   ├── 📄 CACHE_ARCHITECTURE.md      # Per-sensor cache design
 │   ├── 📄 DATA_FLOW_DIAGRAM.md       # Architecture evolution
-│   └── 📄 flow_data.md               # Simple data flow diagram
+│   ├── 📄 PER_SENSOR_CACHE_IMPLEMENTATION.md # Per-sensor cache details
+│   └── 📄 WEBSOCKET_REALTIME_README.md # WebSocket implementation guide
 │
 ├── 📁 historyChat/                   # Development history
 │   └── 📄 q-dev-chat-2025-07-02.md  # Implementation conversation log
@@ -54,9 +62,12 @@ kinesis_message_processing/
 ├── 📄 .dockerignore                 # Docker ignore patterns
 ├── 📄 lambda_kinesis_rust.yaml      # CloudFormation template
 ├── 📄 cache-table.yaml              # DynamoDB cache table template
+├── 📄 websocket-infrastructure.yaml # WebSocket API Gateway template
+├── 📄 websocket-client-example.html # WebSocket test client with microsecond UI
+├── 📄 deploy-websocket.sh           # WebSocket deployment script
 ├── 📄 samconfig.toml                # SAM deployment configuration
-├── 📄 commands_docker.xt            # Docker build & deploy commands
-└── 📄 printDirectory.sh             # Directory structure utility
+├── 📄 buildDocker-for-serverless-rust-KinesisProcessor.sh # Docker build script
+└── 📄 DockerfileWebsocket           # WebSocket Lambda container build
 ```
 
 ## Core Components
@@ -64,20 +75,32 @@ kinesis_message_processing/
 ### 🚀 Lambda Functions
 
 #### **Main Processor** (`lambda/mesagges/`)
-- **Purpose**: High-performance Kinesis event processing with caching
+- **Purpose**: High-performance Kinesis event processing with caching and WebSocket notifications
 - **Key Features**:
   - Per-sensor independent cache storage (1-minute TTL)
+  - Nanosecond precision timestamps (reading_timestamp_ns)
+  - Real-time WebSocket notifications with microsecond latency tracking
   - Connection pooling (20 pre-warmed Snowflake connections)
   - Dynamic batch sizing (100-2000 records)
   - Concurrent processing with semaphore control
   - Comprehensive error handling with DLQ integration
 
+#### **WebSocket Lambda** (`lambda/websocket/`)
+- **Purpose**: Real-time WebSocket connection management and data streaming
+- **Key Features**:
+  - Connection lifecycle management ($connect, $disconnect, $default)
+  - Per-sensor subscription handling with nanosecond precision
+  - Real-time data streaming with microsecond latency measurement
+  - Multi-sensor dashboard queries
+  - Comprehensive error handling and connection cleanup
+
 #### **Shared Library** (`lambda/shared/`)
-- **Purpose**: Common types and business logic
+- **Purpose**: Common types and business logic with precision timestamps
 - **Components**:
   - `NewSensorReading` struct with position data
+  - `HighPrecisionSensorReading` with nanosecond timestamps
   - Business validation (temperature < 100°C)
-  - Serialization/deserialization logic
+  - Serialization/deserialization logic with precision support
 
 ### 🗄️ Cache System
 
@@ -85,8 +108,12 @@ kinesis_message_processing/
 - **Table Design**: 
   - Partition Key: `sensor_id` (String)
   - Sort Key: `reading_timestamp` (Number - milliseconds)
+  - Additional: `reading_timestamp_ns` (Number - nanoseconds)
 - **Features**:
   - Per-sensor independent 1-minute TTL
+  - Nanosecond precision timestamp storage
+  - Real-time WebSocket notification integration
+  - Microsecond latency tracking (cache_to_notification_latency_us)
   - Automatic cleanup via DynamoDB TTL
   - Composite key for efficient queries
   - Scalable to unlimited sensors
@@ -119,11 +146,20 @@ kinesis_message_processing/
 - `cache-table.yaml`: DynamoDB cache infrastructure
   - Pay-per-request billing
   - TTL enabled on `expire_at` attribute
-  - DynamoDB Streams for future WebSocket integration
+  - DynamoDB Streams for WebSocket integration
+  - Nanosecond precision timestamp support
+
+- `websocket-infrastructure.yaml`: WebSocket real-time infrastructure
+  - API Gateway WebSocket API with microsecond precision support
+  - WebSocket Lambda function with ARM64 architecture
+  - Connection management DynamoDB table with TTL
+  - IAM roles for WebSocket and DynamoDB access
 
 #### **Container Deployment**
-- `Dockerfile`: Multi-stage Rust build optimized for AWS Lambda
-- `commands_docker.xt`: ECR deployment scripts
+- `Dockerfile`: Multi-stage Rust build optimized for main Kinesis Lambda
+- `DockerfileWebsocket`: Multi-stage build for WebSocket Lambda
+- `buildDocker-for-serverless-rust-KinesisProcessor.sh`: ECR deployment scripts
+- `deploy-websocket.sh`: WebSocket infrastructure deployment automation
 - ARM64 architecture for cost optimization
 
 ### 📊 Configuration Management
@@ -137,10 +173,14 @@ MIN_BATCH_SIZE=200
 MAX_CONNECTIONS=20
 TIMEOUT_MS=1000
 
-# Cache Configuration (Per-Sensor)
+# Cache Configuration (Per-Sensor with Nanosecond Precision)
 CACHE_TABLE_NAME=sensor_readings_cache
 CACHE_TTL_SECONDS=60                    # 1 minute per sensor
 CACHE_CHECK_INTERVAL_SECONDS=60         # Background check every 1 minute
+
+# WebSocket Configuration (Microsecond Precision)
+CONNECTION_TABLE_NAME=websocket_connections
+WEBSOCKET_API_ENDPOINT=https://api-id.execute-api.region.amazonaws.com/prod
 
 # Snowflake Configuration
 SNOWFLAKE_ACCOUNT=your-account
@@ -157,18 +197,26 @@ DLQ_URL=https://sqs.region.amazonaws.com/account/dlq-name
 
 ## Data Flow Architecture
 
-### Current Implementation (Phase 1)
+### Current Implementation (Phase 2 - WebSocket Real-Time)
 ```
 ┌─────────────┐    ┌──────────────┐    ┌─────────────────┐    ┌─────────────────┐
 │   KINESIS   │───▶│ RUST LAMBDA  │───▶│ DYNAMODB CACHE  │───▶│ BACKGROUND TASK │
-│   Stream    │    │  Processor   │    │   (1 minute)    │    │ (Every 1 minute)│
+│   Stream    │    │  Processor   │    │ (1 min + ns)    │    │ (Every 1 minute)│
 └─────────────┘    └──────────────┘    └─────────────────┘    └─────────────────┘
-                                                                        │
-                                                                        ▼
-                                                               ┌─────────────────┐
-                                                               │   SNOWFLAKE     │
-                                                               │  Persistence    │
-                                                               └─────────────────┘
+                                                │                        │
+                                                ▼                        ▼
+                                       ┌─────────────────┐    ┌─────────────────┐
+                                       │   WEBSOCKET     │    │   SNOWFLAKE     │
+                                       │   API Gateway   │    │  Persistence    │
+                                       │   (μs latency)  │    └─────────────────┘
+                                       └─────────────────┘
+                                                │
+                                                ▼
+                                       ┌─────────────────┐
+                                       │   HTML CLIENT   │
+                                       │ Real-time UI    │
+                                       │ (ns precision)  │
+                                       └─────────────────┘
 ```
 
 ### Per-Sensor Cache Behavior
@@ -191,10 +239,12 @@ Time: 10:01:00
 
 ### 🎯 Performance Characteristics
 - **Cache Latency**: 5-50ms per sensor reading
-- **Throughput**: 10,000+ records/second
+- **WebSocket Latency**: 0.5-2ms with microsecond precision
+- **Throughput**: 10,000+ records/second with real-time streaming
 - **Background Processing**: Every 60 seconds
 - **Snowflake Persistence**: 300-800ms per batch
-- **Multi-Sensor Support**: Unlimited with independent lifecycles
+- **Multi-Sensor Support**: Unlimited with independent lifecycles and WebSocket streams
+- **Timestamp Precision**: Nanosecond accuracy with microsecond latency tracking
 
 ### 🔧 Operational Excellence
 - **Structured Logging**: CloudWatch integration with targets
@@ -236,26 +286,37 @@ cargo run --bin kinesis-test-utility snowflake
 
 ### 📊 Monitoring
 - CloudWatch metrics for cache hit/miss rates per sensor
+- WebSocket connection metrics and message throughput
+- Microsecond latency distribution tracking
 - DynamoDB TTL cleanup efficiency (60-second intervals)
 - Lambda performance and error rates
 - Snowflake query performance and costs
+- Real-time WebSocket subscription patterns per sensor
+
+## Current Features (Implemented)
+
+### ✅ WebSocket Real-Time Streaming
+- Real-time data streaming from cache with microsecond precision
+- Per-sensor subscription management
+- Connection lifecycle management with TTL
+- HTML test client with live performance metrics
 
 ## Future Roadmap
 
-### Phase 2: WebSocket Integration
-- Real-time data streaming from cache
-- WASM client-side processing
-- D3.js visualization dashboard
+### Phase 3: Advanced Visualization
+- WASM client-side processing for high-performance visualization
+- D3.js integration for advanced real-time charts
+- Client-side state management and optimization
 
-### Phase 3: Multi-Region Support
+### Phase 4: Multi-Region Support
 - Global distribution with regional caches
-- Cross-region replication
-- Edge computing integration
+- Cross-region replication with sensor-aware routing
+- Edge computing integration for global real-time access
 
-### Phase 4: Advanced Analytics
+### Phase 5: Advanced Analytics
 - Real-time anomaly detection per sensor
-- Machine learning integration
-- Predictive analytics on sensor patterns
+- Machine learning integration with live inference
+- Predictive analytics on sensor patterns with WebSocket alerts
 
 ## Dependencies
 

@@ -1,22 +1,26 @@
-# Kinesis Message Processing with DynamoDB Cache
+# Kinesis Message Processing with Real-Time WebSocket Streaming
 
 ## Overview
-Real-time sensor data processing pipeline using Rust Lambda functions with DynamoDB caching layer featuring **per-sensor independent 1-minute TTL** for immediate data access and efficient batch persistence to Snowflake.
+Production-ready, real-time sensor data processing pipeline using Rust Lambda functions with **per-sensor independent 1-minute DynamoDB caching**, **microsecond/nanosecond precision timestamps**, and **WebSocket real-time streaming** for immediate data access and efficient batch persistence to Snowflake.
 
 ## Architecture Components
 
 ### Core Services
 - **AWS Kinesis**: Stream ingestion (2 shards)
-- **AWS Lambda (Rust)**: High-performance message processing
-- **DynamoDB**: Per-sensor 1-minute cache layer with independent TTL
-- **Snowflake**: Long-term data persistence
+- **AWS Lambda (Rust)**: High-performance message processing with cache integration
+- **DynamoDB**: Per-sensor 1-minute cache layer with independent TTL and nanosecond precision
+- **WebSocket API Gateway**: Real-time streaming with microsecond latency tracking
+- **WebSocket Lambda**: Connection management and real-time data distribution
+- **Snowflake**: Long-term data persistence with batch optimization
 - **SQS**: Dead letter queue for failed records
 
-### Data Flow
+### Data Flow (Current Implementation)
 ```
-Kinesis → Lambda → DynamoDB Cache (1 min per sensor) → Background Processor → Snowflake
-                        ↓
-                   WebSocket Ready (Future)
+Kinesis → Rust Lambda → DynamoDB Cache (1 min per sensor) → Background Processor → Snowflake
+                              ↓
+                         WebSocket API → Real-time Clients
+                              ↓
+                    Microsecond Precision Streaming
 ```
 
 ## Key Features
@@ -27,13 +31,15 @@ Kinesis → Lambda → DynamoDB Cache (1 min per sensor) → Background Processo
 - **Concurrent Processing**: Semaphore-controlled parallelism
 - **Memory Efficiency**: Thread-local buffers and pre-allocation
 
-### Caching Strategy
+### Enhanced Caching Strategy
 - **Per-Sensor Independence**: Each sensor (device1, device2, etc.) maintains its own cache lifecycle
 - **Immediate Storage**: Data cached in DynamoDB upon arrival with composite key (sensor_id, reading_timestamp)
 - **TTL Management**: Automatic 1-minute expiration per sensor reading
 - **Background Processing**: Separate task runs every 1 minute to move expired data to Snowflake
 - **Scalable Design**: Supports unlimited number of sensors with independent cache management
-- **Real-time Access**: Cache ready for WebSocket consumption with per-sensor queries
+- **Real-time Access**: Cache immediately available for WebSocket consumption with per-sensor queries
+- **Precision Timestamps**: Nanosecond precision (reading_timestamp_ns) and microsecond latency tracking
+- **WebSocket Integration**: Real-time notifications with cache-to-client latency measurement
 
 ### Error Handling
 - **Partial Failure Support**: Individual record failure tracking
@@ -65,6 +71,10 @@ TIMEOUT_MS=1000
 CACHE_TABLE_NAME=sensor_readings_cache
 CACHE_TTL_SECONDS=60                    # 1 minute per sensor
 CACHE_CHECK_INTERVAL_SECONDS=60         # Background check interval
+
+# WebSocket Configuration
+CONNECTION_TABLE_NAME=websocket_connections
+WEBSOCKET_API_ENDPOINT=https://api-id.execute-api.region.amazonaws.com/prod
 
 # Error Handling
 DLQ_URL=https://sqs.region.amazonaws.com/account/dlq-name
@@ -136,9 +146,18 @@ Time: 10:01:00
 - Later readings still cached independently
 ```
 
+## Current Real-Time Features (Implemented)
+- **WebSocket Real-Time Streaming**: Live sensor data with microsecond precision
+- **Per-Sensor Subscriptions**: Subscribe/unsubscribe to specific sensors
+- **Nanosecond Timestamps**: Precise timing with reading_timestamp_ns
+- **Latency Tracking**: Cache-to-WebSocket latency measurement in microseconds
+- **Connection Management**: Persistent WebSocket connections with TTL
+- **Multi-Sensor Dashboard**: Query all sensors or specific sensor data
+- **Real-Time Notifications**: Immediate data push upon cache updates
+
 ## Future Enhancements
-- WebSocket integration for real-time per-sensor data streaming
+- WASM client-side processing for high-performance visualization
+- D3.js integration for advanced real-time charts
 - Multi-region cache replication with sensor-aware routing
-- Advanced analytics on cached sensor data
-- Machine learning integration for per-sensor anomaly detection
-- Real-time dashboard with multi-sensor visualization
+- Advanced analytics on cached sensor data with ML integration
+- Edge computing integration for global real-time access

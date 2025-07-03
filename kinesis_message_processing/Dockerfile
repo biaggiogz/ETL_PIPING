@@ -7,10 +7,11 @@ FROM chef AS planner
 COPY Cargo.toml Cargo.lock ./
 COPY lambda/mesagges/Cargo.toml ./lambda/mesagges/
 COPY lambda/shared/Cargo.toml ./lambda/shared/
+COPY lambda/websocket/Cargo.toml ./lambda/websocket/
 COPY test/Cargo.toml ./test/
 # Create dummy source files to satisfy cargo-chef dependency analysis
-RUN mkdir -p lambda/mesagges/src lambda/shared/src test/src && \
-    touch lambda/mesagges/src/main.rs lambda/shared/src/lib.rs test/src/main.rs && \
+RUN mkdir -p lambda/mesagges/src lambda/shared/src lambda/websocket/src test/src && \
+    touch lambda/mesagges/src/main.rs lambda/shared/src/lib.rs lambda/websocket/src/main.rs test/src/main.rs && \
     cargo chef prepare --recipe-path recipe.json
 
 

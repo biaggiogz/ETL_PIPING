@@ -507,3 +507,237 @@
     </script>
 </body>
 </html>
+                isConnected = false;
+                updateConnectionStatus('disconnected', 'Disconnected');
+                addLog('info', `WebSocket closed: ${event.code} - ${event.reason}`);
+            };
+
+            websocket.onerror = function(error) {
+                addLog('error', `WebSocket error: ${error.message || 'Unknown error'}`);
+            };
+        }
+
+        function disconnect() {
+            if (websocket) {
+                websocket.close();
+                websocket = null;
+            }
+        }
+
+        function sendMessage(message) {
+            if (websocket && isConnected) {
+                websocket.send(JSON.stringify(message));
+                addLog('info', `Sent: ${JSON.stringify(message)}`);
+            } else {
+                addLog('error', 'WebSocket not connected');
+            }
+        }
+
+        function subscribeToSelected() {
+            const sensorId = document.getElementById('sensorSelect').value;
+            if (!sensorId) {
+                addLog('error', 'Please select a sensor');
+                return;
+            }
+            subscribeToSensor(sensorId);
+        }
+
+        function subscribeToSensor(sensorId) {
+            sendMessage({
+                action: 'subscribe',
+                sensor_id: sensorId
+            });
+            subscribedSensors.add(sensorId);
+            updateSensorCard(sensorId);
+        }
+
+        function unsubscribeFromSensor(sensorId) {
+            sendMessage({
+                action: 'unsubscribe',
+                sensor_id: sensorId
+            });
+            subscribedSensors.delete(sensorId);
+            updateSensorCard(sensorId);
+        }
+
+        function getAllLatest() {
+            sendMessage({
+                action: 'get_latest'
+            });
+        }
+
+        function handleMessage(data) {
+            messageCount++;
+            const now = performance.now();
+            messageTimestamps.push(now);
+            
+            // Keep only last 10 seconds of timestamps for rate calculation
+            const tenSecondsAgo = now - 10000;
+            messageTimestamps = messageTimestamps.filter(t => t > tenSecondsAgo);
+
+            switch (data.type) {
+                case 'real_time_reading':
+                    handleRealTimeReading(data);
+                    break;
+                case 'latest_readings':
+                    handleLatestReadings(data);
+                    break;
+                case 'all_latest_readings':
+                    handleAllLatestReadings(data);
+                    break;
+                case 'error':
+                    addLog('error', `Server error: ${data.message}`);
+                    break;
+                case 'success':
+                    addLog('success', `Server: ${data.message}`);
+                    break;
+                default:
+                    addLog('info', `Received: ${JSON.stringify(data)}`);
+            }
+
+            updateMetrics();
+        }
+
+        function handleRealTimeReading(data) {
+            const latencyUs = data.cache_to_notification_latency_us || 0;
+            latencySum += latencyUs;
+            
+            sensorData.set(data.sensor_id, {
+                ...data,
+                lastUpdated: Date.now()
+            });
+
+            updateSensorCard(data.sensor_id, data);
+            
+            addLog('success', 
+                `📡 ${data.sensor_id}: ${data.temperature}°C ` +
+                `[${formatTimestamp(data.reading_timestamp_ns)}ns] ` +
+                `Latency: ${latencyUs}μs`
+            );
+        }
+
+        function handleLatestReadings(data) {
+            addLog('info', `📊 Latest readings for ${data.sensor_id}: ${data.count} records`);
+            if (data.readings && data.readings.length > 0) {
+                const latest = data.readings[0];
+                sensorData.set(data.sensor_id, {
+                    ...latest,
+                    lastUpdated: Date.now()
+                });
+                updateSensorCard(data.sensor_id, latest);
+            }
+        }
+
+        function handleAllLatestReadings(data) {
+            addLog('info', `📊 All latest readings: ${data.sensor_count} sensors`);
+            for (const [sensorId, readings] of Object.entries(data.sensors)) {
+                if (readings && readings.length > 0) {
+                    const latest = readings[0];
+                    sensorData.set(sensorId, {
+                        ...latest,
+                        lastUpdated: Date.now()
+                    });
+                    updateSensorCard(sensorId, latest);
+                }
+            }
+        }
+
+        function updateSensorCard(sensorId, data = null) {
+            const grid = document.getElementById('sensorGrid');
+            let card = document.getElementById(`sensor-${sensorId}`);
+            
+            if (!card) {
+                card = document.createElement('div');
+                card.id = `sensor-${sensorId}`;
+                card.className = 'sensor-card';
+                grid.appendChild(card);
+            }
+
+            const isSubscribed = subscribedSensors.has(sensorId);
+            const sensorInfo = data || sensorData.get(sensorId) || {};
+
+            card.innerHTML = `
+                <div class="sensor-header">
+                    <div class="sensor-id">🔗 ${sensorId}</div>
+                    <button class="subscribe-btn ${isSubscribed ? 'subscribed' : 'unsubscribed'}" 
+                            onclick="${isSubscribed ? 'unsubscribeFromSensor' : 'subscribeToSensor'}('${sensorId}')">
+                        ${isSubscribed ? 'Unsubscribe' : 'Subscribe'}
+                    </button>
+                </div>
+                <div class="sensor-data">
+                    <div class="data-item">
+                        <span class="data-label">Temperature:</span>
+                        <span class="data-value">${sensorInfo.temperature?.toFixed(2) || 'N/A'}°C</span>
+                    </div>
+                    <div class="data-item">
+                        <span class="data-label">Speed:</span>
+                        <span class="data-value">${sensorInfo.speed_kms?.toFixed(1) || 'N/A'} km/h</span>
+                    </div>
+                    <div class="data-item">
+                        <span class="data-label">Latitude:</span>
+                        <span class="data-value">${sensorInfo.position?.latitude?.toFixed(4) || 'N/A'}</span>
+                    </div>
+                    <div class="data-item">
+                        <span class="data-label">Longitude:</span>
+                        <span class="data-value">${sensorInfo.position?.longitude?.toFixed(4) || 'N/A'}</span>
+                    </div>
+                    <div class="data-item">
+                        <span class="data-label">Connection:</span>
+                        <span class="data-value">${sensorInfo.connection_speed_mbps?.toFixed(1) || 'N/A'} Mbps</span>
+                    </div>
+                    <div class="data-item">
+                        <span class="data-label">Latency:</span>
+                        <span class="data-value">${sensorInfo.latency_us || 'N/A'}μs</span>
+                    </div>
+                    <div class="data-item" style="grid-column: 1 / -1;">
+                        <span class="data-label">Timestamp (ns):</span>
+                        <span class="data-value" style="font-size: 10px;">${formatTimestamp(sensorInfo.reading_timestamp_ns)}</span>
+                    </div>
+                </div>
+            `;
+        }
+
+        function updateMetrics() {
+            document.getElementById('totalMessages').textContent = messageCount;
+            document.getElementById('activeSensors').textContent = sensorData.size;
+            document.getElementById('messagesPerSecond').textContent = 
+                (messageTimestamps.length / 10).toFixed(1);
+            
+            if (messageCount > 0) {
+                document.getElementById('avgLatencyUs').textContent = 
+                    Math.round(latencySum / messageCount);
+            }
+        }
+
+        function formatTimestamp(timestampNs) {
+            if (!timestampNs) return 'N/A';
+            return timestampNs.toString().replace(/(\d)(?=(\d{3})+(?!\d))/g, '$1,');
+        }
+
+        function addLog(type, message) {
+            const container = document.getElementById('logContainer');
+            const entry = document.createElement('div');
+            entry.className = `log-entry log-${type}`;
+            
+            const timestamp = new Date().toLocaleTimeString();
+            entry.textContent = `[${timestamp}] ${message}`;
+            
+            container.appendChild(entry);
+            container.scrollTop = container.scrollHeight;
+            
+            // Keep only last 100 log entries
+            while (container.children.length > 100) {
+                container.removeChild(container.firstChild);
+            }
+        }
+
+        function clearLogs() {
+            document.getElementById('logContainer').innerHTML = '';
+        }
+
+        // Initialize
+        addLog('info', 'WebSocket client initialized with microsecond precision support');
+        addLog('info', 'Enter your WebSocket URL and click Connect to start streaming');
+    </script>
+</body>
+</html>
