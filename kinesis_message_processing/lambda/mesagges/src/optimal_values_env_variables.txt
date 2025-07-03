@@ -19,8 +19,8 @@ SNOWFLAKE_WAREHOUSE=COMPUTE_WH
 
 # DynamoDB Cache Configuration
 CACHE_TABLE_NAME=sensor_readings_cache
-CACHE_TTL_SECONDS=60
-CACHE_CHECK_INTERVAL_SECONDS=60
+CACHE_TTL_SECONDS=60  # 1 minute cache per sensor
+CACHE_CHECK_INTERVAL_SECONDS=60  # Check every 1 minute for expired data
 
 # DLQ Configuration
 DLQ_URL=https://sqs.region.amazonaws.com/account/dlq-name

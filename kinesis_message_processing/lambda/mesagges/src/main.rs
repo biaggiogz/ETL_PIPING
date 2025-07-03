@@ -359,7 +359,7 @@ async fn function_handler(event: LambdaEvent<KinesisEvent>, pool: Arc<Mutex<Snow
                                     });
                                 } else {
                                     // Successfully cached
-                                    tracing::info!("✓ Cached reading for partition {}", partition_key);
+                                    tracing::info!("✓ Cached reading for sensor {}", partition_key);
                                 }
                             },
                             Err(e) => {

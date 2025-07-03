@@ -1,5 +1,12 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'DynamoDB Cache Table for Sensor Readings'
+Description: |
+  DynamoDB Cache Table for Sensor Readings - Per-Sensor Independent TTL
+  
+  This table supports independent 1-minute caching per sensor:
+  - Each sensor (device1, device2, etc.) maintains its own cache entries
+  - TTL expires readings exactly 1 minute after creation
+  - Supports unlimited number of sensors
+  - Optimized for real-time WebSocket access and batch processing
 
 Resources:
   SensorReadingsCache:
@@ -8,11 +15,15 @@ Resources:
       TableName: sensor_readings_cache
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
-        - AttributeName: cache_key
+        - AttributeName: sensor_id
           AttributeType: S
+        - AttributeName: reading_timestamp
+          AttributeType: N
       KeySchema:
-        - AttributeName: cache_key
+        - AttributeName: sensor_id
           KeyType: HASH
+        - AttributeName: reading_timestamp
+          KeyType: RANGE
       TimeToLiveSpecification:
         AttributeName: expire_at
         Enabled: true
@@ -23,6 +34,8 @@ Resources:
           Value: SensorDataCache
         - Key: Environment
           Value: Production
+        - Key: CacheStrategy
+          Value: PerSensorIndependentTTL
 
 Outputs:
   CacheTableName:

@@ -28,20 +28,19 @@ impl DynamoCache {
         }
     }
 
-    pub async fn cache_reading(&self, reading: &NewSensorReading, partition_key: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn cache_reading(&self, reading: &NewSensorReading, sensor_id: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
         
         let expire_at = now + self.ttl_seconds;
-        let cache_key = format!("{}_{}", partition_key, reading.reading_timestamp as u64);
+        let reading_timestamp_ms = (reading.reading_timestamp * 1000.0) as u64;
 
         let mut item = HashMap::new();
-        item.insert("cache_key".to_string(), AttributeValue::S(cache_key));
-        item.insert("partition_key".to_string(), AttributeValue::S(partition_key.to_string()));
+        item.insert("sensor_id".to_string(), AttributeValue::S(sensor_id.to_string()));
+        item.insert("reading_timestamp".to_string(), AttributeValue::N(reading_timestamp_ms.to_string()));
         item.insert("temperature".to_string(), AttributeValue::N(reading.temperature.to_string()));
-        item.insert("reading_timestamp".to_string(), AttributeValue::N(reading.reading_timestamp.to_string()));
         item.insert("latitude".to_string(), AttributeValue::N(reading.position.latitude.to_string()));
         item.insert("longitude".to_string(), AttributeValue::N(reading.position.longitude.to_string()));
         item.insert("speed_kms".to_string(), AttributeValue::N(reading.speed_kms.to_string()));
@@ -59,19 +58,20 @@ impl DynamoCache {
             Ok(_) => {
                 info!(
                     target: "cache_operation",
-                    partition_key = partition_key,
-                    cache_key = format!("{}_{}", partition_key, reading.reading_timestamp as u64),
+                    sensor_id = sensor_id,
+                    reading_timestamp = reading_timestamp_ms,
                     expire_at = expire_at,
-                    "✓ Cached reading for {} seconds (1 minute)", self.ttl_seconds
+                    ttl_seconds = self.ttl_seconds,
+                    "✓ Cached reading for sensor {} - expires in {} seconds (1 minute)", sensor_id, self.ttl_seconds
                 );
                 Ok(())
             }
             Err(e) => {
                 error!(
                     target: "cache_operation",
-                    partition_key = partition_key,
+                    sensor_id = sensor_id,
                     error = %e,
-                    "❌ Failed to cache reading: {}", e
+                    "❌ Failed to cache reading for sensor {}: {}", sensor_id, e
                 );
                 Err(Box::new(e))
             }
@@ -121,11 +121,12 @@ impl DynamoCache {
         for chunk in readings.chunks(25) {
             let mut delete_requests = Vec::new();
             
-            for (reading, partition_key) in chunk {
-                let cache_key = format!("{}_{}", partition_key, reading.reading_timestamp as u64);
+            for (reading, sensor_id) in chunk {
+                let reading_timestamp_ms = (reading.reading_timestamp * 1000.0) as u64;
                 
                 let mut key = HashMap::new();
-                key.insert("cache_key".to_string(), AttributeValue::S(cache_key));
+                key.insert("sensor_id".to_string(), AttributeValue::S(sensor_id.clone()));
+                key.insert("reading_timestamp".to_string(), AttributeValue::N(reading_timestamp_ms.to_string()));
                 
                 delete_requests.push(
                     aws_sdk_dynamodb::types::WriteRequest::builder()
@@ -167,9 +168,9 @@ impl DynamoCache {
     }
 
     fn item_to_reading(&self, item: &HashMap<String, AttributeValue>) -> Result<(NewSensorReading, String), Box<dyn std::error::Error + Send + Sync>> {
-        let partition_key = item.get("partition_key")
+        let sensor_id = item.get("sensor_id")
             .and_then(|v| v.as_s().ok())
-            .ok_or("Missing partition_key")?
+            .ok_or("Missing sensor_id")?
             .clone();
 
         let temperature = item.get("temperature")
@@ -177,10 +178,12 @@ impl DynamoCache {
             .and_then(|s| s.parse::<f32>().ok())
             .ok_or("Invalid temperature")?;
 
-        let reading_timestamp = item.get("reading_timestamp")
+        let reading_timestamp_ms = item.get("reading_timestamp")
             .and_then(|v| v.as_n().ok())
-            .and_then(|s| s.parse::<f32>().ok())
+            .and_then(|s| s.parse::<u64>().ok())
             .ok_or("Invalid reading_timestamp")?;
+        
+        let reading_timestamp = reading_timestamp_ms as f32 / 1000.0;
 
         let latitude = item.get("latitude")
             .and_then(|v| v.as_n().ok())
@@ -210,6 +213,6 @@ impl DynamoCache {
             connection_speed_mbps,
         };
 
-        Ok((reading, partition_key))
+        Ok((reading, sensor_id))
     }
 }
