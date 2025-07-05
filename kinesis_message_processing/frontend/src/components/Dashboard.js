@@ -1,11 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, memo } from 'react';
 import {
   Box, Grid, VStack, HStack, Text, Input, Button, Select,
   Badge, Card, CardBody, Stat, StatLabel, StatNumber
 } from '@chakra-ui/react';
 import { useWebSocket } from '../hooks/useWebSocket';
 
-export const Dashboard = () => {
+const Dashboard = memo(() => {
   const [wsUrl, setWsUrl] = useState('wss://your-api-id.execute-api.region.amazonaws.com/prod');
   const [connectedUrl, setConnectedUrl] = useState('');
   const [selectedSensor, setSelectedSensor] = useState('');
@@ -16,7 +16,7 @@ export const Dashboard = () => {
       if (isConnected) {
         sendMessage({ action: 'get_latest' });
       }
-    }, 500);
+    }, 100); // Back to 100ms as requested
     return () => clearInterval(interval);
   }, [isConnected, sendMessage]);
 
@@ -33,9 +33,18 @@ export const Dashboard = () => {
     }
   };
 
-  const temperatures = Array.from(sensorData.values()).map(d => d.temperature).filter(t => t != null);
-  const avgTemp = temperatures.length > 0 ? temperatures.reduce((a, b) => a + b, 0) / temperatures.length : 0;
-  const selectedSensorReading = sensorData.get(selectedSensor);
+  const { temperatures, avgTemp, selectedSensorReading, sensorOptions } = useMemo(() => {
+    const temps = Array.from(sensorData.values()).map(d => d.temperature).filter(t => t != null);
+    const avg = temps.length > 0 ? temps.reduce((a, b) => a + b, 0) / temps.length : 0;
+    const selected = sensorData.get(selectedSensor);
+    const options = Array.from(sensorData.keys());
+    return {
+      temperatures: temps,
+      avgTemp: avg,
+      selectedSensorReading: selected,
+      sensorOptions: options
+    };
+  }, [sensorData, selectedSensor]);
 
   return (
     <Grid templateColumns="300px 1fr" h="100vh" gap={4} p={4}>
@@ -69,7 +78,7 @@ export const Dashboard = () => {
                 value={selectedSensor}
                 onChange={(e) => setSelectedSensor(e.target.value)}
               >
-                {Array.from(sensorData.keys()).map(sensorId => (
+                {sensorOptions.map(sensorId => (
                   <option key={sensorId} value={sensorId}>
                     {sensorId}
                   </option>
@@ -170,4 +179,6 @@ export const Dashboard = () => {
       </VStack>
     </Grid>
   );
-};
+});
+
+export { Dashboard };

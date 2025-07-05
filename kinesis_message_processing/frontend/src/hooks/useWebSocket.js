@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 
 export const useWebSocket = (url) => {
   const [isConnected, setIsConnected] = useState(false);
@@ -6,6 +6,52 @@ export const useWebSocket = (url) => {
   const [subscribedSensors, setSubscribedSensors] = useState(new Set());
   const [messageCount, setMessageCount] = useState(0);
   const ws = useRef(null);
+  const sensorDataRef = useRef(new Map());
+  const subscribedSensorsRef = useRef(new Set());
+
+  const handleMessage = useCallback((data) => {
+    setMessageCount(prev => prev + 1);
+    
+    switch (data.type) {
+      case 'real_time_reading':
+        sensorDataRef.current.set(data.sensor_id, {
+          ...data,
+          lastUpdated: Date.now()
+        });
+        setSensorData(new Map(sensorDataRef.current));
+        break;
+      case 'latest_readings':
+        if (data.readings && data.readings.length > 0) {
+          const latest = data.readings[0];
+          sensorDataRef.current.set(data.sensor_id, {
+            ...latest,
+            lastUpdated: Date.now()
+          });
+          setSensorData(new Map(sensorDataRef.current));
+        }
+        break;
+      case 'all_latest_readings':
+        for (const [sensorId, readings] of Object.entries(data.sensors)) {
+          if (readings && readings.length > 0) {
+            const latest = readings[0];
+            sensorDataRef.current.set(sensorId, {
+              ...latest,
+              lastUpdated: Date.now()
+            });
+          }
+        }
+        setSensorData(new Map(sensorDataRef.current));
+        break;
+      case 'error':
+        console.error('Server error:', data.message);
+        break;
+      case 'success':
+        console.log('Server success:', data.message);
+        break;
+      default:
+        console.log('Unknown message type:', data);
+    }
+  }, []);
 
   useEffect(() => {
     if (!url) return;
@@ -36,76 +82,24 @@ export const useWebSocket = (url) => {
     };
 
     return () => ws.current?.close();
-  }, [url]);
+  }, [url, handleMessage]);
 
-  const handleMessage = (data) => {
-    setMessageCount(prev => prev + 1);
-    
-    switch (data.type) {
-      case 'real_time_reading':
-        setSensorData(prev => {
-          const newData = new Map(prev);
-          newData.set(data.sensor_id, {
-            ...data,
-            lastUpdated: Date.now()
-          });
-          return newData;
-        });
-        break;
-      case 'latest_readings':
-        if (data.readings && data.readings.length > 0) {
-          setSensorData(prev => {
-            const newData = new Map(prev);
-            const latest = data.readings[0];
-            newData.set(data.sensor_id, {
-              ...latest,
-              lastUpdated: Date.now()
-            });
-            return newData;
-          });
-        }
-        break;
-      case 'all_latest_readings':
-        setSensorData(prev => {
-          const newData = new Map(prev);
-          for (const [sensorId, readings] of Object.entries(data.sensors)) {
-            if (readings && readings.length > 0) {
-              const latest = readings[0];
-              newData.set(sensorId, {
-                ...latest,
-                lastUpdated: Date.now()
-              });
-            }
-          }
-          return newData;
-        });
-        break;
-      case 'error':
-        console.error('Server error:', data.message);
-        break;
-      case 'success':
-        console.log('Server success:', data.message);
-        break;
-      default:
-        console.log('Unknown message type:', data);
-    }
-  };
-
-  const sendMessage = (message) => {
+  const sendMessage = useCallback((message) => {
     if (ws.current?.readyState === WebSocket.OPEN) {
       ws.current.send(JSON.stringify(message));
     }
-  };
+  }, []);
 
-  const subscribeToSensor = (sensorId) => {
+  const subscribeToSensor = useCallback((sensorId) => {
     if (ws.current?.readyState === WebSocket.OPEN) {
       ws.current.send(JSON.stringify({
         action: 'subscribe',
         sensor_id: sensorId
       }));
-      setSubscribedSensors(prev => new Set([...prev, sensorId]));
+      subscribedSensorsRef.current.add(sensorId);
+      setSubscribedSensors(new Set(subscribedSensorsRef.current));
     }
-  };
+  }, []);
 
   return { 
     isConnected, 
