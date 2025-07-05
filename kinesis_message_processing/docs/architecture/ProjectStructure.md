@@ -17,7 +17,7 @@ KINESIS → RUST LAMBDA → [DynamoDB Cache - 1 min per sensor] → Background T
 ```
 kinesis_message_processing/
 ├── 📁 lambda/                          # Lambda functions
-│   ├── 📁 mesagges/                    # Main Kinesis processor
+│   ├── 📁 messages/                    # Main Kinesis processor (fixed typo)
 │   │   ├── 📄 Cargo.toml              # Dependencies & metadata
 │   │   ├── 📄 Cargo.lock              # Dependency lock file
 │   │   └── 📁 src/
@@ -36,45 +36,61 @@ kinesis_message_processing/
 │       └── 📁 src/
 │           └── 📄 lib.rs              # Sensor reading types & validation with precision timestamps
 │
+├── 📁 infrastructure/                 # Infrastructure as Code
+│   ├── 📁 cloudformation/             # CloudFormation templates
+│   │   ├── 📄 lambda_kinesis_rust.yaml      # Main serverless stack
+│   │   ├── 📄 cache-table.yaml             # DynamoDB cache table
+│   │   └── 📄 websocket-infrastructure.yaml # WebSocket API Gateway
+│   │
+│   └── 📁 docker/                     # Docker configurations
+│       ├── 📄 Dockerfile              # Multi-stage Kinesis Lambda build
+│       ├── 📄 DockerfileWebsocket     # WebSocket Lambda container build
+│       └── 📄 .dockerignore           # Docker ignore patterns
+│
+├── 📁 scripts/                        # Deployment automation
+│   ├── 📄 buildDocker-for-serverless-rust-KinesisProcessor.sh # Docker build script
+│   └── 📄 deploy-websocket.sh         # WebSocket deployment script
+│
+├── 📁 config/                         # Configuration files
+│   └── 📄 samconfig.toml              # SAM deployment configuration
+│
+├── 📁 docs/                           # Documentation
+│   ├── 📁 architecture/               # Technical documentation
+│   │   ├── 📄 IMPLEMENTATION_SUMMARY.md  # Technical implementation details
+│   │   ├── 📄 PROJECT_DOCUMENTATION.md   # Comprehensive documentation
+│   │   ├── 📄 ProjectStructure.md        # Project structure overview
+│   │   ├── 📄 CACHE_ARCHITECTURE.md      # Per-sensor cache design
+│   │   ├── 📄 DATA_FLOW_DIAGRAM.md       # Architecture evolution
+│   │   ├── 📄 PER_SENSOR_CACHE_IMPLEMENTATION.md # Per-sensor cache details
+│   │   └── 📄 WEBSOCKET_REALTIME_README.md # WebSocket implementation guide
+│   │
+│   └── 📁 examples/                   # HTML examples and visualizations
+│       ├── 📄 websocket-client-example.html # WebSocket test client with microsecond UI
+│       ├── 📄 advanced-d3-visualization.html # Advanced D3.js dashboard
+│       ├── 📄 wasm-d3-chakra-visualization.html # WASM + Chakra UI dashboard
+│       ├── 📄 test-visualizations.html      # Test links page
+│       └── 📁 wasm-visualization/           # WASM processing module
+│
 ├── 📁 test/                           # Test utilities
 │   ├── 📄 Cargo.toml                 # Test dependencies
 │   └── 📁 src/
 │       └── 📄 main.rs                # Kinesis & Snowflake test client
 │
-├── 📁 Docs/                          # Documentation
-│   ├── 📄 IMPLEMENTATION_SUMMARY.md  # Technical implementation details
-│   ├── 📄 PROJECT_DOCUMENTATION.md   # Comprehensive documentation
-│   ├── 📄 ProjectStructure.md        # Project structure overview
-│   ├── 📄 CACHE_ARCHITECTURE.md      # Per-sensor cache design
-│   ├── 📄 DATA_FLOW_DIAGRAM.md       # Architecture evolution
-│   ├── 📄 PER_SENSOR_CACHE_IMPLEMENTATION.md # Per-sensor cache details
-│   └── 📄 WEBSOCKET_REALTIME_README.md # WebSocket implementation guide
-│
 ├── 📁 historyChat/                   # Development history
 │   └── 📄 q-dev-chat-2025-07-02.md  # Implementation conversation log
 │
-├── 📁 .aws-sam/                     # SAM build artifacts
-│   └── 📄 build.toml                # SAM build configuration
-│
-├── 📄 Cargo.toml                    # Workspace configuration
-├── 📄 Cargo.lock                    # Workspace dependency lock
-├── 📄 Dockerfile                    # Multi-stage container build
-├── 📄 .dockerignore                 # Docker ignore patterns
-├── 📄 lambda_kinesis_rust.yaml      # CloudFormation template
-├── 📄 cache-table.yaml              # DynamoDB cache table template
-├── 📄 websocket-infrastructure.yaml # WebSocket API Gateway template
-├── 📄 websocket-client-example.html # WebSocket test client with microsecond UI
-├── 📄 deploy-websocket.sh           # WebSocket deployment script
-├── 📄 samconfig.toml                # SAM deployment configuration
-├── 📄 buildDocker-for-serverless-rust-KinesisProcessor.sh # Docker build script
-└── 📄 DockerfileWebsocket           # WebSocket Lambda container build
+├── 📄 Makefile                       # Automated deployment and build
+├── 📄 README.md                      # Project documentation and usage
+├── 📄 .env.example                   # Environment variables template
+├── 📄 Cargo.toml                     # Workspace configuration
+└── 📄 Cargo.lock                     # Workspace dependency lock
 ```
 
 ## Core Components
 
 ### 🚀 Lambda Functions
 
-#### **Main Processor** (`lambda/mesagges/`)
+#### **Main Processor** (`lambda/messages/`)
 - **Purpose**: High-performance Kinesis event processing with caching and WebSocket notifications
 - **Key Features**:
   - Per-sensor independent cache storage (1-minute TTL)
@@ -136,7 +152,7 @@ kinesis_message_processing/
 
 ### ☁️ AWS Resources
 
-#### **CloudFormation Templates**
+#### **CloudFormation Templates** (`infrastructure/cloudformation/`)
 - `lambda_kinesis_rust.yaml`: Complete serverless stack
   - Lambda function with ARM64 architecture
   - Kinesis stream (2 shards)
@@ -155,14 +171,24 @@ kinesis_message_processing/
   - Connection management DynamoDB table with TTL
   - IAM roles for WebSocket and DynamoDB access
 
-#### **Container Deployment**
+#### **Container Deployment** (`infrastructure/docker/`)
 - `Dockerfile`: Multi-stage Rust build optimized for main Kinesis Lambda
 - `DockerfileWebsocket`: Multi-stage build for WebSocket Lambda
-- `buildDocker-for-serverless-rust-KinesisProcessor.sh`: ECR deployment scripts
-- `deploy-websocket.sh`: WebSocket infrastructure deployment automation
+- `.dockerignore`: Docker ignore patterns for optimized builds
 - ARM64 architecture for cost optimization
 
-### 📊 Configuration Management
+#### **Deployment Automation** (`scripts/`)
+- `buildDocker-for-serverless-rust-KinesisProcessor.sh`: ECR deployment scripts
+- `deploy-websocket.sh`: WebSocket infrastructure deployment automation
+
+### 🔧 **Automated Deployment** (`Makefile`)
+- **Build Commands**: `make build`, `make build-kinesis`, `make build-websocket`
+- **Deploy Commands**: `make deploy`, `make deploy-cache`, `make deploy-kinesis`, `make deploy-websocket`
+- **Push Commands**: `make push`, `make push-kinesis`, `make push-websocket`
+- **Utility Commands**: `make status`, `make outputs`, `make clean`, `make destroy`
+- **Development Commands**: `make dev-build`, `make test`, `make fmt`, `make check`
+
+### 📊 Configuration Management (`config/`)
 
 #### **Environment Variables** (Production Optimized)
 ```bash
@@ -208,6 +234,15 @@ DLQ_URL=https://sqs.region.amazonaws.com/account/dlq-name
                                        ┌─────────────────┐    ┌─────────────────┐
                                        │   WEBSOCKET     │    │   SNOWFLAKE     │
                                        │   API Gateway   │    │  Persistence    │
+                                       │   (μs latency)  │    └─────────────────┘
+                                       └─────────────────┘
+                                                │
+                                                ▼
+                                       ┌─────────────────┐
+                                       │   HTML CLIENT   │
+                                       │ Real-time UI    │
+                                       │ (ns precision)  │
+                                       └─────────────────┘   │   API Gateway   │    │  Persistence    │
                                        │   (μs latency)  │    └─────────────────┘
                                        └─────────────────┘
                                                 │

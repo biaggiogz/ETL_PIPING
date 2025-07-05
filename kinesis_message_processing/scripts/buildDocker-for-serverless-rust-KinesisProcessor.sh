@@ -23,7 +23,7 @@ docker buildx build --platform linux/arm64 \
   --build-arg package=kinesis-lambda \
   --build-arg TARGETPLATFORM=linux/arm64 \
   --network=host \
-  -f Dockerfile \
+  -f infrastructure/docker/Dockerfile \
   -t ${IMAGE_NAME}:${VERSION} .
 
 # Tag and push to ECR

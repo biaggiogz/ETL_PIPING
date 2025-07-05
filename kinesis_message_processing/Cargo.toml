@@ -1,5 +1,5 @@
 [workspace]
-members = [ "lambda/mesagges", "lambda/shared", "lambda/websocket", "test"]
+members = ["lambda/messages", "lambda/shared", "lambda/websocket", "test"]
 resolver = "2"
 
 [workspace.package]

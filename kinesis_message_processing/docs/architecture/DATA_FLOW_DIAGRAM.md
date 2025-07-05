@@ -55,6 +55,8 @@
                                        │     D3.js       │              
                                        │ Visualization   │          
                                        │ (Real-time)     │
+                                       │  HOSTED  ON     │  
+                                       │   CLOUDFRONT    │
                                        └─────────────────┘          
 ```
 

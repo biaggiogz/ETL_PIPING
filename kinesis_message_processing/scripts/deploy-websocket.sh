@@ -31,7 +31,7 @@ DOCKER_TAG="latest"
 docker build --platform linux/arm64 \
   --build-arg TARGETPLATFORM=linux/arm64 \
   --network=host \
-  -f DockerfileWebsocket \
+  -f infrastructure/docker/DockerfileWebsocket \
   -t ${DOCKER_IMAGE_NAME}:${DOCKER_TAG} .
 
 # Step 2: Push Docker image to ECR
@@ -52,7 +52,7 @@ echo "✅ Docker image pushed to ECR: $IMAGE_URI"
 # Step 3: Deploy CloudFormation stack with container image
 echo "☁️ Deploying CloudFormation stack with container image..."
 aws cloudformation deploy \
-  --template-file websocket-infrastructure.yaml \
+  --template-file infrastructure/cloudformation/websocket-infrastructure.yaml \
   --stack-name $STACK_NAME \
   --parameter-overrides \
     CacheTableName=$CACHE_TABLE_NAME \

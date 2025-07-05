@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Visualization Test Links</title>
+    <style>
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            max-width: 800px; 
+            margin: 50px auto; 
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .card { 
+            background: white; 
+            padding: 20px; 
+            margin: 20px 0; 
+            border-radius: 8px; 
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .status { 
+            padding: 10px; 
+            border-radius: 4px; 
+            margin: 10px 0; 
+        }
+        .working { background: #d4edda; color: #155724; }
+        .fixed { background: #fff3cd; color: #856404; }
+        a { 
+            display: inline-block; 
+            padding: 10px 20px; 
+            background: #007bff; 
+            color: white; 
+            text-decoration: none; 
+            border-radius: 4px; 
+            margin: 5px 0;
+        }
+        a:hover { background: #0056b3; }
+    </style>
+</head>
+<body>
+    <h1>🚀 WebSocket Sensor Visualization Test</h1>
+    
+    <div class="card">
+        <h2>📊 Available Visualizations</h2>
+        
+        <h3>1. Basic WebSocket Client (Working)</h3>
+        <div class="status working">✅ This was already working</div>
+        <a href="websocket-client-example.html" target="_blank">Open Basic Client</a>
+        <p>Simple, functional WebSocket client with sensor data display.</p>
+        
+        <h3>2. Advanced D3.js Visualization (Fixed)</h3>
+        <div class="status working">✅ Fixed - Cleaned up corrupted JavaScript</div>
+        <a href="advanced-d3-visualization.html" target="_blank">Open Advanced D3 Dashboard</a>
+        <p>Advanced dashboard with D3.js charts and real-time visualizations.</p>
+        
+        <h3>3. Simple Real-Time Dashboard (Fixed)</h3>
+        <div class="status working">✅ Fixed - Simplified without React/Chakra dependencies</div>
+        <a href="wasm-d3-chakra-visualization.html" target="_blank">Open Simple Dashboard</a>
+        <p>Clean, simple dashboard with real-time sensor data display.</p>
+    </div>
+    
+    <div class="card">
+        <h2>🔧 What Was Fixed</h2>
+        <ul>
+            <li><strong>advanced-d3-visualization.html</strong>: Removed module imports, simplified JavaScript, fixed WebSocket handling</li>
+            <li><strong>wasm-d3-chakra-visualization.html</strong>: Removed React/Chakra dependencies, created simple HTML/CSS/JS version</li>
+            <li>Both files now work without external dependencies</li>
+            <li>Added proper CSS styling and UI components</li>
+            <li>Fixed connection status and sensor management</li>
+        </ul>
+    </div>
+    
+    <div class="card">
+        <h2>📝 Usage Instructions</h2>
+        <ol>
+            <li>Open any of the visualization files above</li>
+            <li>Enter your WebSocket URL (e.g., <code>wss://your-api-id.execute-api.region.amazonaws.com/prod</code>)</li>
+            <li>Click "Connect" to establish WebSocket connection</li>
+            <li>Use "Get All Latest" to fetch initial data</li>
+            <li>Select sensors and subscribe to real-time updates</li>
+        </ol>
+        
+        <p><strong>Note:</strong> If WASM module fails to load, the visualizations will fall back to JavaScript processing.</p>
+    </div>
+</body>
+</html>

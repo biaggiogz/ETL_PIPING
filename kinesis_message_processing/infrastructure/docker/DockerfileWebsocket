@@ -6,11 +6,11 @@ FROM chef AS planner
 COPY Cargo.toml Cargo.lock ./
 COPY lambda/websocket/Cargo.toml ./lambda/websocket/
 COPY lambda/shared/Cargo.toml ./lambda/shared/
-COPY lambda/mesagges/Cargo.toml ./lambda/mesagges/
+COPY lambda/messages/Cargo.toml ./lambda/messages/
 COPY test/Cargo.toml ./test/
 # Create dummy source files to satisfy cargo-chef dependency analysis
-RUN mkdir -p lambda/websocket/src lambda/shared/src lambda/mesagges/src test/src && \
-    touch lambda/websocket/src/main.rs lambda/shared/src/lib.rs lambda/mesagges/src/main.rs test/src/main.rs && \
+RUN mkdir -p lambda/websocket/src lambda/shared/src lambda/messages/src test/src && \
+    touch lambda/websocket/src/main.rs lambda/shared/src/lib.rs lambda/messages/src/main.rs test/src/main.rs && \
     cargo chef prepare --recipe-path recipe.json
 
 FROM chef AS cacher
@@ -35,7 +35,7 @@ COPY --from=cacher /usr/src/app/target target
 COPY Cargo.toml Cargo.lock ./
 COPY lambda/websocket/ ./lambda/websocket/
 COPY lambda/shared/ ./lambda/shared/
-COPY lambda/mesagges/ ./lambda/mesagges/
+COPY lambda/messages/ ./lambda/messages/
 COPY test/ ./test/
 
 RUN case ${TARGETPLATFORM} in \
