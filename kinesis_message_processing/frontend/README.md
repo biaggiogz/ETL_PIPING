@@ -1,24 +1,19 @@
-# Sensor Dashboard - Phase 3
+# Sensor Dashboard React App
 
-Real-time React dashboard consuming WebSocket data from Rust Lambda backend.
+## Setup
 
-## Features
-- **Chakra UI** for modern, responsive interface
-- **D3.js** for interactive temperature charts
-- **100ms refresh rate** for real-time updates
-- WebSocket integration with your Rust backend
-
-## Quick Start
 ```bash
-cd frontend
+cd kinesis_message_processing/frontend
 npm install
 npm start
 ```
 
-## WebSocket Connection
-Connect to your deployed WebSocket API Gateway endpoint from the Rust lambda/websocket service.
+The app will run on http://localhost:3000
 
-## Architecture Integration
-- Consumes data from `kinesis_message_processing/lambda/websocket`
-- Displays real-time sensor readings with microsecond precision
-- Auto-refreshes every 100ms for smooth real-time experience
+## Features
+
+- Real-time WebSocket connection to sensor data
+- Interactive sensor subscription management
+- D3.js visualizations for temperature, latency, and heatmap
+- Responsive dashboard layout
+- Live metrics display
