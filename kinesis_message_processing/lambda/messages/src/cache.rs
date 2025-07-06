@@ -1,5 +1,5 @@
 use aws_sdk_dynamodb::{Client as DynamoClient, types::AttributeValue};
-use aws_sdk_apigatewaymanagement::Client as ApiGwClient;
+use aws_sdk_apigatewaymanagement::{Client as ApiGwClient, primitives::Blob};
 use shared::NewSensorReading;
 use std::collections::HashMap;
 use std::env::var;
@@ -13,30 +13,36 @@ pub struct DynamoCache {
     cache_table: String,
     connection_table: String,
     ttl_seconds: u64,
-    _websocket_client: Option<ApiGwClient>,
+    websocket_client: Option<ApiGwClient>,
 }
 
 impl DynamoCache {
-    pub fn new(client: DynamoClient) -> Self {
+    pub async fn new(client: DynamoClient) -> Self {
         let cache_table = var("CACHE_TABLE_NAME")
             .unwrap_or_else(|_| "sensor_readings_cache".to_string());
         let connection_table = var("CONNECTION_TABLE_NAME")
             .unwrap_or_else(|_| "websocket_connections".to_string());
         let ttl_seconds = var("CACHE_TTL_SECONDS")
-            .unwrap_or_else(|_| "60".to_string())
+            .unwrap_or_else(|_| "300".to_string())  // 5 minutes for testing
             .parse()
-            .unwrap_or(60);
+            .unwrap_or(300);
 
-        // Initialize WebSocket client if endpoint is available
-        // WebSocket client initialization placeholder - will be implemented when needed
-        let websocket_client = None;
+        let websocket_client = if let Ok(endpoint) = var("WEBSOCKET_API_ENDPOINT") {
+            let config = aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await;
+            let apigw_config = aws_sdk_apigatewaymanagement::config::Builder::from(&config)
+                .endpoint_url(endpoint)
+                .build();
+            Some(ApiGwClient::from_conf(apigw_config))
+        } else {
+            None
+        };
 
         Self {
             client,
             cache_table,
             connection_table,
             ttl_seconds,
-            _websocket_client: websocket_client,
+            websocket_client,
         }
     }
 
@@ -161,7 +167,7 @@ impl DynamoCache {
                         .delete_request(
                             aws_sdk_dynamodb::types::DeleteRequest::builder()
                                 .set_key(Some(key))
-                                .build()
+                                .build()?
                         )
                         .build()
                 );
@@ -245,7 +251,10 @@ impl DynamoCache {
     }
 
     async fn notify_websocket_subscribers(&self, sensor_id: &str, reading: &NewSensorReading, cache_timestamp_ns: u128) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        // Query active WebSocket connections subscribed to this sensor
+        let Some(ws_client) = &self.websocket_client else {
+            return Ok(()); // No WebSocket client configured
+        };
+
         let scan_result = self.client
             .scan()
             .table_name(&self.connection_table)
@@ -279,23 +288,40 @@ impl DynamoCache {
                 "cache_to_notification_latency_us": (notification_start_ns - cache_timestamp_ns) / 1000
             });
 
-            let _message = serde_json::to_string(&real_time_data)?;
+            let message = serde_json::to_string(&real_time_data)?;
             let mut successful_notifications = 0;
-            let failed_notifications = 0;
+            let mut failed_notifications = 0;
 
             for item in items {
                 if let Some(connection_id) = item.get("connection_id").and_then(|v| v.as_s().ok()) {
-                    // Note: WebSocket client would need to be properly initialized
-                    // This is a placeholder for the actual WebSocket notification logic
-                    info!(
-                        target: "websocket_notification",
-                        connection_id = connection_id,
-                        sensor_id = sensor_id,
-                        latency_ns = notification_start_ns - cache_timestamp_ns,
-                        latency_us = (notification_start_ns - cache_timestamp_ns) / 1000,
-                        "📡 Real-time notification sent with microsecond precision"
-                    );
-                    successful_notifications += 1;
+                    match ws_client
+                        .post_to_connection()
+                        .connection_id(connection_id)
+                        .data(Blob::new(message.as_bytes()))
+                        .send()
+                        .await
+                    {
+                        Ok(_) => {
+                            successful_notifications += 1;
+                            info!(
+                                target: "websocket_notification",
+                                connection_id = connection_id,
+                                sensor_id = sensor_id,
+                                latency_us = (notification_start_ns - cache_timestamp_ns) / 1000,
+                                "📡 Real-time notification sent"
+                            );
+                        }
+                        Err(e) => {
+                            failed_notifications += 1;
+                            warn!(
+                                target: "websocket_notification",
+                                connection_id = connection_id,
+                                sensor_id = sensor_id,
+                                error = %e,
+                                "⚠️ Failed to send notification"
+                            );
+                        }
+                    }
                 }
             }
 
@@ -305,8 +331,7 @@ impl DynamoCache {
                     sensor_id = sensor_id,
                     successful = successful_notifications,
                     failed = failed_notifications,
-                    total_latency_ns = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos() - notification_start_ns,
-                    "✅ Sent real-time notifications to {} subscribers with nanosecond precision", successful_notifications
+                    "✅ Sent real-time notifications to {} subscribers", successful_notifications
                 );
             }
         }

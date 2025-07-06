@@ -14,6 +14,7 @@ use std::time::Duration;
 use aws_sdk_sqs::{Client as SqsClient, types::SendMessageBatchRequestEntry};
 use aws_sdk_dynamodb::Client as DynamoClient;
 use tracing::{info, warn, error, Level, span};
+use base64::prelude::*;
 
 mod cache;
 mod cache_processor;
@@ -288,18 +289,19 @@ async fn function_handler(event: LambdaEvent<KinesisEvent>, pool: Arc<Mutex<Snow
     let grouping_start = std::time::Instant::now();
     for message in &event.payload.records {
         let sequence_number = match &message.kinesis.sequence_number {
-            Some(sn) => sn.clone(),
-            None => {
-                warn!(
-                    target: "data_validation",
-                    approximate_arrival = ?message.kinesis.approximate_arrival_timestamp,
-                    "⚠️ Record without sequence number, skipping"
-                );
-                continue;
-            }
+            sn => sn.clone(),
         };
         
-        let partition_key = message.kinesis.partition_key.clone().unwrap_or_default();
+        if sequence_number.is_empty() {
+            warn!(
+                target: "data_validation",
+                approximate_arrival = ?message.kinesis.approximate_arrival_timestamp,
+                "⚠️ Record without sequence number, skipping"
+            );
+            continue;
+        }
+        
+        let partition_key = message.kinesis.partition_key.clone();
         let data = message.kinesis.data.0.as_slice();
 
         partition_groups
@@ -452,7 +454,7 @@ async fn main() -> Result<(), Error> {
         .init();
 
     // Initialize AWS SDK
-    let config = aws_config::load_from_env().await;
+    let config = aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await;
     let sqs_client = SqsClient::new(&config);
     let dynamo_client = DynamoClient::new(&config);
     
@@ -475,7 +477,7 @@ async fn main() -> Result<(), Error> {
     };
 
     // Initialize DynamoDB cache
-    let cache = Arc::new(DynamoCache::new(dynamo_client));
+    let cache = Arc::new(DynamoCache::new(dynamo_client).await);
     
     // Initialize and start cache processor
     let cache_processor = CacheProcessor::new(Arc::clone(&cache), Arc::clone(&pool));
@@ -529,7 +531,7 @@ async fn send_to_dlq(
             let message_body = serde_json::json!({
                 "sequence_number": record.sequence_number,
                 "partition_key": record.partition_key,
-                "data_base64": base64::encode(&record.data),
+                "data_base64": base64::prelude::BASE64_STANDARD.encode(&record.data),
                 "error": record.error,
                 "timestamp": chrono::Utc::now().to_rfc3339(),
             });
@@ -538,7 +540,7 @@ async fn send_to_dlq(
                 SendMessageBatchRequestEntry::builder()
                     .id(format!("msg-{}", i))
                     .message_body(message_body.to_string())
-                    .build(),
+                    .build()?,
             );
         }
         
@@ -551,10 +553,9 @@ async fn send_to_dlq(
             .await
         {
             Ok(response) => {
-                if let Some(failed) = response.failed {
-                    if !failed.is_empty() {
-                        tracing::error!("Failed to send {} messages to DLQ", failed.len());
-                    }
+                let failed = response.failed;
+                if !failed.is_empty() {
+                    tracing::error!("Failed to send {} messages to DLQ", failed.len());
                 }
                 tracing::info!("Sent {} failed records to DLQ", chunk.len());
             }

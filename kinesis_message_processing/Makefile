@@ -4,7 +4,7 @@
 # Configuration
 AWS_REGION ?= us-east-1
 AWS_ACCOUNT ?= $(shell aws sts get-caller-identity --query Account --output text)
-VERSION ?= $(shell date +%Y%m%d-%H%M%S)
+VERSION ?= $(shell read -p "Enter version: " version; echo $$version)
 STACK_NAME ?= kinesis-lambda-rust
 CACHE_STACK_NAME ?= sensor-cache-table
 WEBSOCKET_STACK_NAME ?= sensor-websocket-realtime
@@ -35,6 +35,7 @@ build-kinesis: ## Build Kinesis Lambda Docker image
 	docker buildx build --platform linux/arm64 \
 		--build-arg package=kinesis-lambda \
 		--build-arg TARGETPLATFORM=linux/arm64 \
+		--network=host \
 		-f $(DOCKER_DIR)/Dockerfile \
 		-t $(KINESIS_IMAGE_NAME):$(VERSION) .
 	@echo "✅ Kinesis image built: $(KINESIS_IMAGE_NAME):$(VERSION)"
@@ -43,6 +44,7 @@ build-websocket: ## Build WebSocket Lambda Docker image
 	@echo "🔨 Building WebSocket Lambda Docker image..."
 	docker buildx build --platform linux/arm64 \
 		--build-arg TARGETPLATFORM=linux/arm64 \
+		--network=host \
 		-f $(DOCKER_DIR)/DockerfileWebsocket \
 		-t $(WEBSOCKET_IMAGE_NAME):$(VERSION) .
 	@echo "✅ WebSocket image built: $(WEBSOCKET_IMAGE_NAME):$(VERSION)"
