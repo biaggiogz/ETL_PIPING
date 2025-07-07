@@ -84,8 +84,19 @@ Resources:
                   - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${CacheTableName}'
               - Effect: Allow
                 Action:
-                  - execute-api:ManageConnections
+                  - execute-api:*
                 Resource: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketApi}/*/*'
+        - PolicyName: CloudWatchMetrics
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cloudwatch:PutMetricData
+                Resource: '*'
+                Condition:
+                  StringEquals:
+                    'cloudwatch:namespace': 'SensorLatency'
 
   # WebSocket Lambda Function
   WebSocketLambdaFunction:
@@ -127,6 +138,27 @@ Resources:
     Properties:
       ApiId: !Ref WebSocketApi
       RouteKey: $default
+      Target: !Sub 'integrations/${DefaultIntegration}'
+
+  SubscribeRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: subscribe
+      Target: !Sub 'integrations/${DefaultIntegration}'
+
+  UnsubscribeRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: unsubscribe
+      Target: !Sub 'integrations/${DefaultIntegration}'
+
+  GetLatestRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: getLatest
       Target: !Sub 'integrations/${DefaultIntegration}'
 
   # WebSocket Integrations
@@ -183,6 +215,9 @@ Resources:
       - ConnectRoute
       - DisconnectRoute
       - DefaultRoute
+      - SubscribeRoute
+      - UnsubscribeRoute
+      - GetLatestRoute
     Properties:
       ApiId: !Ref WebSocketApi
 

@@ -10,17 +10,20 @@ use tokio::sync::{Mutex, Semaphore};
 use futures::future::{join_all, FutureExt};
 use std::collections::HashMap;
 
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 use aws_sdk_sqs::{Client as SqsClient, types::SendMessageBatchRequestEntry};
 use aws_sdk_dynamodb::Client as DynamoClient;
+use aws_sdk_cloudwatch::{Client as CloudWatchClient, types::{MetricDatum, Dimension}, primitives::DateTime};
 use tracing::{info, warn, error, Level, span};
 use base64::prelude::*;
 
 mod cache;
 mod cache_processor;
+mod latency_tracker;
 
 use cache::DynamoCache;
 use cache_processor::CacheProcessor;
+use latency_tracker::LatencyTracker;
 
 
 fn get_env_usize(key: &str, default: usize) -> usize {
@@ -250,7 +253,7 @@ struct RecordProcessingResult {
     error: Option<String>,
 }
 
-async fn function_handler(event: LambdaEvent<KinesisEvent>, pool: Arc<Mutex<SnowflakePool>>, cache: Arc<DynamoCache>) -> Result<(KinesisEventResponse, Vec<RecordProcessingResult>), Error> {
+async fn function_handler(event: LambdaEvent<KinesisEvent>, pool: Arc<Mutex<SnowflakePool>>, cache: Arc<DynamoCache>, latency_tracker: Arc<Mutex<LatencyTracker>>, cloudwatch_client: CloudWatchClient) -> Result<(KinesisEventResponse, Vec<RecordProcessingResult>), Error> {
     let handler_span = span!(
         Level::INFO, 
         "kinesis_processing",
@@ -329,6 +332,8 @@ async fn function_handler(event: LambdaEvent<KinesisEvent>, pool: Arc<Mutex<Snow
         let _pool_clone = Arc::clone(&pool);
         let cache_clone = Arc::clone(&cache);
         let semaphore_clone = Arc::clone(&semaphore);
+        let latency_tracker_clone = Arc::clone(&latency_tracker);
+        let cloudwatch_client_clone = cloudwatch_client.clone();
         let partition_key_clone = partition_key;
 
         let future = async move {
@@ -347,10 +352,20 @@ async fn function_handler(event: LambdaEvent<KinesisEvent>, pool: Arc<Mutex<Snow
 
                 match parse_result {
                     Ok(sensor_reading) => {
+                        // Extract Kinesis timestamp for latency tracking
+                        let kinesis_timestamp_ns = (sensor_reading.reading_timestamp as u128) * 1_000_000_000;
+                        
                         match NewSensorReadingHandler::handle(&sensor_reading).await {
                             Ok(_) => {
-                                // Cache the reading instead of adding to batch for immediate persistence
-                                if let Err(e) = cache_clone.cache_reading(&sensor_reading, &partition_key).await {
+                                // Start latency tracking
+                                {
+                                    let mut tracker = latency_tracker_clone.lock().await;
+                                    tracker.start_tracking(partition_key.clone(), kinesis_timestamp_ns);
+                                }
+                                
+                                // Cache the reading with latency tracking
+                                let cache_start = std::time::Instant::now();
+                                if let Err(e) = cache_clone.cache_reading_with_latency(&sensor_reading, &partition_key, &latency_tracker_clone).await {
                                     let error_msg = format!("Failed to cache reading: {:?}", e);
                                     tracing::warn!("{} with sequence number: {}", error_msg, sequence_number);
                                     failed_records.push(RecordProcessingResult {
@@ -360,8 +375,28 @@ async fn function_handler(event: LambdaEvent<KinesisEvent>, pool: Arc<Mutex<Snow
                                         error: Some(error_msg),
                                     });
                                 } else {
-                                    // Successfully cached
-                                    tracing::info!("✓ Cached reading for sensor {}", partition_key);
+                                    let cache_duration = cache_start.elapsed();
+                                    
+                                    // Log and publish latency metrics
+                                    {
+                                        let tracker = latency_tracker_clone.lock().await;
+                                        if let Some(metrics) = tracker.get_metrics(&partition_key) {
+                                            metrics.log_metrics(&partition_key);
+                                            
+                                            // Publish to CloudWatch
+                                            let cw_clone = cloudwatch_client_clone.clone();
+                                            let sensor_id = partition_key.clone();
+                                            let metrics_clone = metrics.clone();
+                                            tokio::spawn(async move {
+                                                let _ = publish_latency_metrics(&cw_clone, &sensor_id, &metrics_clone).await;
+                                            });
+                                        }
+                                    }
+                                    
+                                    tracing::info!(
+                                        "✓ Cached reading for sensor {} in {:?} - Kinesis timestamp: {}ns", 
+                                        partition_key, cache_duration, kinesis_timestamp_ns
+                                    );
                                 }
                             },
                             Err(e) => {
@@ -457,6 +492,7 @@ async fn main() -> Result<(), Error> {
     let config = aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await;
     let sqs_client = SqsClient::new(&config);
     let dynamo_client = DynamoClient::new(&config);
+    let cloudwatch_client = CloudWatchClient::new(&config);
     
     // Get DLQ URL from environment variable
     let dlq_url = var("DLQ_URL").unwrap_or_else(|_| {
@@ -489,14 +525,31 @@ async fn main() -> Result<(), Error> {
     });
 
     // Create a closure that captures the pool, cache, and SQS client
+    // Initialize latency tracker
+    let latency_tracker = Arc::new(Mutex::new(LatencyTracker::new()));
+    let cw_client = cloudwatch_client;
+    
+    // Start cleanup task for old latency metrics
+    let tracker_cleanup = Arc::clone(&latency_tracker);
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(300)); // 5 minutes
+        loop {
+            interval.tick().await;
+            let mut tracker = tracker_cleanup.lock().await;
+            tracker.cleanup_old_metrics(600); // Clean metrics older than 10 minutes
+        }
+    });
+    
     let handler_func = move |event: LambdaEvent<KinesisEvent>| {
         let pool_clone = Arc::clone(&pool);
         let cache_clone = Arc::clone(&cache_clone);
         let sqs_client_clone = sqs_client.clone();
         let dlq_url_clone = dlq_url.clone();
+        let latency_tracker_clone = Arc::clone(&latency_tracker);
+        let cw_client_clone = cw_client.clone();
         
         async move { 
-            let (response, failed_records) = function_handler(event, pool_clone, cache_clone).await?;
+            let (response, failed_records) = function_handler(event, pool_clone, cache_clone, latency_tracker_clone, cw_client_clone).await?;
             
             // Send failed records to DLQ if URL is provided
             if !dlq_url_clone.is_empty() && !failed_records.is_empty() {
@@ -566,5 +619,61 @@ async fn send_to_dlq(
         }
     }
     
+    Ok(())
+}
+
+// Publish latency metrics to CloudWatch
+async fn publish_latency_metrics(
+    cloudwatch_client: &CloudWatchClient,
+    sensor_id: &str,
+    metrics: &crate::latency_tracker::LatencyMetrics,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let timestamp = DateTime::from(SystemTime::now());
+    
+    let dimensions = vec![
+        Dimension::builder()
+            .name("SensorId")
+            .value(sensor_id)
+            .build(),
+    ];
+
+    let metric_data = vec![
+        MetricDatum::builder()
+            .metric_name("KinesisToLambdaLatency")
+            .value(metrics.kinesis_to_lambda_us as f64)
+            .unit(aws_sdk_cloudwatch::types::StandardUnit::Microseconds)
+            .timestamp(timestamp)
+            .set_dimensions(Some(dimensions.clone()))
+            .build(),
+        MetricDatum::builder()
+            .metric_name("LambdaProcessingLatency")
+            .value(metrics.lambda_processing_us as f64)
+            .unit(aws_sdk_cloudwatch::types::StandardUnit::Microseconds)
+            .timestamp(timestamp)
+            .set_dimensions(Some(dimensions.clone()))
+            .build(),
+        MetricDatum::builder()
+            .metric_name("CacheToWebSocketLatency")
+            .value(metrics.cache_to_websocket_us as f64)
+            .unit(aws_sdk_cloudwatch::types::StandardUnit::Microseconds)
+            .timestamp(timestamp)
+            .set_dimensions(Some(dimensions.clone()))
+            .build(),
+        MetricDatum::builder()
+            .metric_name("TotalPipelineLatency")
+            .value(metrics.total_pipeline_us as f64)
+            .unit(aws_sdk_cloudwatch::types::StandardUnit::Microseconds)
+            .timestamp(timestamp)
+            .set_dimensions(Some(dimensions))
+            .build(),
+    ];
+
+    cloudwatch_client
+        .put_metric_data()
+        .namespace("SensorLatency")
+        .set_metric_data(Some(metric_data))
+        .send()
+        .await?;
+
     Ok(())
 }

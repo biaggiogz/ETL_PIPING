@@ -6,9 +6,16 @@ Globals:
     Timeout: 10
     MemorySize: 3008
 
+Conditions:
+  HasWebSocketApi: !Not [!Equals [!Ref WebSocketApiId, ""]]
+
 Parameters:
   ImageUri:
     Type: String
+  WebSocketApiId:
+    Type: String
+    Description: "WebSocket API Gateway ID for real-time notifications"
+    Default: ""
   SnowflakeUsername:
     Type: String
     Description: "Snowflake username"
@@ -39,7 +46,7 @@ Parameters:
     Description: "Batch size for processing"
   MaxConnections:
     Type: Number
-    Default: 4
+    Default: 20
   MaxBatchSize:
     Type: Number
     Default: 2000
@@ -48,7 +55,7 @@ Parameters:
     Default: 100
   TimeoutMS:
     Type: Number
-    Default: 100
+    Default: 1000
   CacheTableName:
     Type: String
     Default: sensor_readings_cache
@@ -144,10 +151,29 @@ Resources:
                 Action:
                   - dynamodb:PutItem
                   - dynamodb:GetItem
+                  - dynamodb:Query
                   - dynamodb:Scan
                   - dynamodb:BatchWriteItem
                   - dynamodb:DeleteItem
-                Resource: !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${CacheTableName}'
+                  - dynamodb:UpdateItem
+                Resource: 
+                  - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${CacheTableName}'
+                  - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/websocket_connections'
+              - Effect: Allow
+                Action:
+                  - execute-api:ManageConnections
+                Resource: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketApiId}/*/*'
+        - PolicyName: CloudWatchMetrics
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cloudwatch:PutMetricData
+                Resource: '*'
+                Condition:
+                  StringEquals:
+                    'cloudwatch:namespace': 'SensorLatency'
 
   MessageStream:
     Type: AWS::Kinesis::Stream
@@ -189,6 +215,11 @@ Resources:
           CACHE_TABLE_NAME: !Ref CacheTableName
           CACHE_TTL_SECONDS: !Ref CacheTTLSeconds
           CACHE_CHECK_INTERVAL_SECONDS: !Ref CacheCheckIntervalSeconds
+          CONNECTION_TABLE_NAME: websocket_connections
+          WEBSOCKET_API_ENDPOINT: !If 
+            - HasWebSocketApi
+            - !Sub 'https://${WebSocketApiId}.execute-api.${AWS::Region}.amazonaws.com/prod'
+            - ''
       EventInvokeConfig:
         MaximumRetryAttempts: 2
         MaximumEventAgeInSeconds: 300

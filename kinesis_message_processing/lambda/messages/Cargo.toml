@@ -8,6 +8,7 @@ aws-config = "1.6.3"
 aws-sdk-sqs = "1.73.0"
 aws-sdk-dynamodb = "1.82.0"
 aws-sdk-apigatewaymanagement = "1.74.0"
+aws-sdk-cloudwatch = "1.74.0"
 aws_lambda_events = { version = "0.16.0", default-features = false, features = ["kinesis", "streams"] }
 base64 = "0.22.1"
 chrono = "0.4.41"

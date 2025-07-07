@@ -11,9 +11,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{info, error, warn};
 
 #[derive(Serialize, Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
 struct WebSocketMessage {
     action: String,
+    #[serde(alias = "sensor_id")]
+    #[serde(rename = "sensorId")]
     sensor_id: Option<String>,
     data: Option<Value>,
 }
@@ -147,7 +148,7 @@ impl WebSocketHandler {
                     self.send_error(connection_id, "Missing sensor_id for unsubscription").await
                 }
             }
-            "get_latest" => {
+            "get_latest" | "getLatest" => {
                 if let Some(sensor_id) = message.sensor_id {
                     self.send_latest_readings(connection_id, &sensor_id).await
                 } else {
@@ -166,24 +167,18 @@ impl WebSocketHandler {
             .unwrap()
             .as_nanos();
 
-        let mut key = HashMap::new();
-        key.insert("connection_id".to_string(), AttributeValue::S(connection_id.to_string()));
-
-        let mut update_expression = "SET subscribed_sensors = if_not_exists(subscribed_sensors, :empty_set)".to_string();
-        update_expression.push_str(", subscribed_sensors = set_add(subscribed_sensors, :sensor_set)");
-        update_expression.push_str(", last_activity_ns = :now_ns");
-
-        let mut expression_values = HashMap::new();
-        expression_values.insert(":empty_set".to_string(), AttributeValue::Ss(vec![]));
-        expression_values.insert(":sensor_set".to_string(), AttributeValue::Ss(vec![sensor_id.to_string()]));
-        expression_values.insert(":now_ns".to_string(), AttributeValue::N(now_ns.to_string()));
+        // First, ensure connection record exists
+        let mut item = HashMap::new();
+        item.insert("connection_id".to_string(), AttributeValue::S(connection_id.to_string()));
+        item.insert("connected_at_ns".to_string(), AttributeValue::N(now_ns.to_string()));
+        item.insert("subscribed_sensors".to_string(), AttributeValue::Ss(vec![sensor_id.to_string()]));
+        item.insert("last_activity_ns".to_string(), AttributeValue::N(now_ns.to_string()));
+        item.insert("ttl".to_string(), AttributeValue::N((now_ns / 1_000_000_000 + 3600).to_string()));
 
         match self.dynamo_client
-            .update_item()
+            .put_item()
             .table_name(&self.connection_table)
-            .set_key(Some(key))
-            .update_expression(update_expression)
-            .set_expression_attribute_values(Some(expression_values))
+            .set_item(Some(item))
             .send()
             .await
         {

@@ -7,93 +7,93 @@
     <script src="https://d3js.org/d3.v7.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { 
+        body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: #333;
         }
-        .dashboard { 
-            display: grid; 
+        .dashboard {
+            display: grid;
             grid-template-columns: 300px 1fr;
             height: 100vh;
         }
-        .sidebar { 
-            background: rgba(255,255,255,0.95); 
-            padding: 20px; 
+        .sidebar {
+            background: rgba(255,255,255,0.95);
+            padding: 20px;
             backdrop-filter: blur(10px);
             border-right: 1px solid rgba(255,255,255,0.2);
         }
-        .main-content { 
-            padding: 20px; 
+        .main-content {
+            padding: 20px;
             overflow-y: auto;
         }
-        .chart-container { 
-            background: rgba(255,255,255,0.95); 
-            border-radius: 12px; 
-            padding: 20px; 
+        .chart-container {
+            background: rgba(255,255,255,0.95);
+            border-radius: 12px;
+            padding: 20px;
             margin-bottom: 20px;
             backdrop-filter: blur(10px);
             box-shadow: 0 8px 32px rgba(0,0,0,0.1);
         }
-        .metrics-grid { 
-            display: grid; 
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); 
-            gap: 15px; 
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
             margin-bottom: 20px;
         }
-        .metric-card { 
+        .metric-card {
             background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
-            color: white; 
-            padding: 20px; 
-            border-radius: 12px; 
+            color: white;
+            padding: 20px;
+            border-radius: 12px;
             text-align: center;
             box-shadow: 0 4px 15px rgba(0,0,0,0.1);
         }
         .metric-value { font-size: 2em; font-weight: bold; }
         .metric-label { font-size: 0.9em; opacity: 0.9; margin-top: 5px; }
-        .connection-status { 
-            padding: 15px; 
-            border-radius: 8px; 
-            margin-bottom: 20px; 
+        .connection-status {
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
             font-weight: bold;
             text-align: center;
         }
         .connected { background: #d4edda; color: #155724; }
         .disconnected { background: #f8d7da; color: #721c24; }
         .controls { margin-bottom: 20px; }
-        .controls input, .controls button, .controls select { 
-            width: 100%; 
-            padding: 10px; 
-            margin: 5px 0; 
-            border: 1px solid #ddd; 
+        .controls input, .controls button, .controls select {
+            width: 100%;
+            padding: 10px;
+            margin: 5px 0;
+            border: 1px solid #ddd;
             border-radius: 6px;
             font-size: 14px;
         }
-        .controls button { 
-            background: #007bff; 
-            color: white; 
-            cursor: pointer; 
+        .controls button {
+            background: #007bff;
+            color: white;
+            cursor: pointer;
             transition: background 0.3s;
         }
         .controls button:hover { background: #0056b3; }
         .controls button:disabled { background: #6c757d; cursor: not-allowed; }
         .sensor-list { max-height: 300px; overflow-y: auto; }
-        .sensor-item { 
-            padding: 10px; 
-            margin: 5px 0; 
-            background: #f8f9fa; 
+        .sensor-item {
+            padding: 10px;
+            margin: 5px 0;
+            background: #f8f9fa;
             border-radius: 6px;
             cursor: pointer;
             transition: all 0.3s;
         }
         .sensor-item:hover { background: #e9ecef; }
         .sensor-item.subscribed { background: #d4edda; border-left: 4px solid #28a745; }
-        .real-time-indicator { 
-            display: inline-block; 
-            width: 10px; 
-            height: 10px; 
-            background: #28a745; 
-            border-radius: 50%; 
+        .real-time-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            background: #28a745;
+            border-radius: 50%;
             animation: pulse 2s infinite;
         }
         @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
@@ -104,7 +104,7 @@
     <div class="dashboard">
         <div class="sidebar">
             <h2>🚀 Sensor Control</h2>
-            
+
             <div id="connectionStatus" class="connection-status disconnected">
                 ❌ Disconnected
             </div>
@@ -113,7 +113,7 @@
                 <input type="text" id="websocketUrl" placeholder="WebSocket URL" />
                 <button onclick="toggleConnection()">Connect</button>
                 <button onclick="getAllLatest()" id="getLatestBtn" disabled>Get All Latest</button>
-                
+
                 <select id="sensorSelect">
                     <option value="">Select Sensor</option>
                     <option value="device1">Device 1</option>
@@ -152,7 +152,7 @@
                     <div class="chart-title">⚡ Latency Distribution</div>
                     <div id="latencyChart">No data available</div>
                 </div>
-                
+
                 <div class="chart-container">
                     <div class="chart-title">🗺️ Sensor Heatmap</div>
                     <div id="heatmapChart">No data available</div>
@@ -188,7 +188,7 @@
             }
 
             websocket = new WebSocket(url);
-            
+
             websocket.onopen = () => {
                 isConnected = true;
                 updateConnectionStatus();
@@ -225,7 +225,7 @@
             const status = document.getElementById('connectionStatus');
             const getLatestBtn = document.getElementById('getLatestBtn');
             const subscribeBtn = document.getElementById('subscribeBtn');
-            
+
             if (isConnected) {
                 status.className = 'connection-status connected';
                 status.innerHTML = '✅ Connected <span class="real-time-indicator"></span>';
@@ -269,7 +269,7 @@
             messageCount++;
             const now = performance.now();
             messageTimestamps.push(now);
-            
+
             const tenSecondsAgo = now - 10000;
             messageTimestamps = messageTimestamps.filter(t => t > tenSecondsAgo);
 
@@ -299,7 +299,7 @@
         function handleRealTimeReading(data) {
             const latencyUs = data.cache_to_notification_latency_us || 0;
             latencySum += latencyUs;
-            
+
             sensorData.set(data.sensor_id, {
                 ...data,
                 lastUpdated: Date.now()
@@ -337,7 +337,7 @@
 
         function updateSensorList() {
             const sensorList = document.getElementById('sensorList');
-            
+
             if (sensorData.size === 0) {
                 sensorList.innerHTML = '<div style="text-align: center; color: #666; padding: 20px;">No sensors detected</div>';
                 return;
@@ -361,7 +361,7 @@
         function populateSensorSelect() {
             const select = document.getElementById('sensorSelect');
             const currentValue = select.value;
-            
+
             select.innerHTML = '<option value="">Select Sensor</option>';
             sensorData.forEach((data, sensorId) => {
                 const option = document.createElement('option');
@@ -369,7 +369,7 @@
                 option.textContent = sensorId;
                 select.appendChild(option);
             });
-            
+
             if (currentValue) {
                 select.value = currentValue;
             }
@@ -396,7 +396,7 @@
 
         function updateMetrics() {
             const metricsGrid = document.getElementById('metricsGrid');
-            
+
             const totalSensors = sensorData.size;
             const temperatures = Array.from(sensorData.values()).map(d => d.temperature).filter(t => t != null);
             const avgTemp = temperatures.length > 0 ? temperatures.reduce((a, b) => a + b, 0) / temperatures.length : 0;
@@ -426,7 +426,7 @@
         // Initialize
         console.log('Advanced D3.js Sensor Dashboard initialized');
         document.getElementById('websocketUrl').value = 'wss://your-api-id.execute-api.region.amazonaws.com/prod';
-        
+
         // Start auto-refresh immediately
         setInterval(() => {
             if (isConnected) {

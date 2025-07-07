@@ -4,8 +4,11 @@ use shared::NewSensorReading;
 use std::collections::HashMap;
 use std::env::var;
 use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::Arc;
+use tokio::sync::Mutex;
 use serde_json::json;
 use tracing::{info, error, warn};
+use crate::latency_tracker::LatencyTracker;
 
 
 pub struct DynamoCache {
@@ -47,6 +50,10 @@ impl DynamoCache {
     }
 
     pub async fn cache_reading(&self, reading: &NewSensorReading, sensor_id: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.cache_reading_with_latency(reading, sensor_id, &Arc::new(Mutex::new(LatencyTracker::new()))).await
+    }
+    
+    pub async fn cache_reading_with_latency(&self, reading: &NewSensorReading, sensor_id: &str, latency_tracker: &Arc<Mutex<LatencyTracker>>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let now_duration = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap();
@@ -78,6 +85,12 @@ impl DynamoCache {
             .await
         {
             Ok(_) => {
+                // Mark cache write in latency tracker
+                {
+                    let mut tracker = latency_tracker.lock().await;
+                    tracker.mark_cache_write(sensor_id);
+                }
+                
                 info!(
                     target: "cache_operation",
                     sensor_id = sensor_id,
@@ -89,8 +102,8 @@ impl DynamoCache {
                     "✓ Cached reading for sensor {} with nanosecond precision - expires in {} seconds (per-sensor independent TTL)", sensor_id, self.ttl_seconds
                 );
                 
-                // Send real-time notification to WebSocket subscribers
-                if let Err(e) = self.notify_websocket_subscribers(sensor_id, reading, now_ns).await {
+                // Send real-time notification to WebSocket subscribers with latency tracking
+                if let Err(e) = self.notify_websocket_subscribers_with_latency(sensor_id, reading, now_ns, latency_tracker).await {
                     warn!(
                         target: "websocket_notification",
                         sensor_id = sensor_id,
@@ -251,17 +264,33 @@ impl DynamoCache {
     }
 
     async fn notify_websocket_subscribers(&self, sensor_id: &str, reading: &NewSensorReading, cache_timestamp_ns: u128) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.notify_websocket_subscribers_with_latency(sensor_id, reading, cache_timestamp_ns, &Arc::new(Mutex::new(LatencyTracker::new()))).await
+    }
+    
+    async fn notify_websocket_subscribers_with_latency(&self, sensor_id: &str, reading: &NewSensorReading, cache_timestamp_ns: u128, latency_tracker: &Arc<Mutex<LatencyTracker>>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let Some(ws_client) = &self.websocket_client else {
             return Ok(()); // No WebSocket client configured
         };
 
-        let scan_result = self.client
+        let scan_result = match self.client
             .scan()
             .table_name(&self.connection_table)
             .filter_expression("contains(subscribed_sensors, :sensor_id)")
             .expression_attribute_values(":sensor_id", AttributeValue::S(sensor_id.to_string()))
             .send()
-            .await?;
+            .await
+        {
+            Ok(result) => result,
+            Err(e) => {
+                warn!(
+                    target: "websocket_notification",
+                    sensor_id = sensor_id,
+                    error = %e,
+                    "⚠️ WebSocket connection table not available: {}", e
+                );
+                return Ok(()); // Skip WebSocket notifications if table doesn't exist
+            }
+        };
 
         if let Some(items) = scan_result.items {
             let notification_start_ns = SystemTime::now()
@@ -269,7 +298,19 @@ impl DynamoCache {
                 .unwrap()
                 .as_nanos();
 
-            let real_time_data = json!({
+            // Mark WebSocket send in latency tracker
+            {
+                let mut tracker = latency_tracker.lock().await;
+                tracker.mark_websocket_send(sensor_id);
+            }
+            
+            // Get latency metrics from tracker
+            let latency_metrics = {
+                let tracker = latency_tracker.lock().await;
+                tracker.get_metrics(sensor_id).cloned()
+            };
+
+            let mut real_time_data = json!({
                 "type": "real_time_reading",
                 "sensor_id": sensor_id,
                 "temperature": reading.temperature,
@@ -285,8 +326,18 @@ impl DynamoCache {
                 "cache_timestamp_ns": cache_timestamp_ns,
                 "notification_timestamp_ns": notification_start_ns,
                 "cache_to_notification_latency_ns": notification_start_ns - cache_timestamp_ns,
-                "cache_to_notification_latency_us": (notification_start_ns - cache_timestamp_ns) / 1000
+                "cache_to_notification_latency_us": (notification_start_ns - cache_timestamp_ns) / 1000,
+                "pipeline_tracking": true
             });
+
+            // Add latency breakdown if available
+            if let Some(metrics) = latency_metrics {
+                real_time_data["kinesis_to_lambda_us"] = json!(metrics.kinesis_to_lambda_us);
+                real_time_data["lambda_processing_us"] = json!(metrics.lambda_processing_us);
+                real_time_data["cache_to_websocket_us"] = json!(metrics.cache_to_websocket_us);
+                real_time_data["websocket_to_frontend_us"] = json!(0); // Will be calculated on frontend
+                real_time_data["total_pipeline_us"] = json!(metrics.total_pipeline_us);
+            }
 
             let message = serde_json::to_string(&real_time_data)?;
             let mut successful_notifications = 0;
