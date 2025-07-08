@@ -42,7 +42,7 @@ Parameters:
     Description: "Snowflake table"
   BatchSize:
     Type: Number
-    Default: 100
+    Default: 10
     Description: "Batch size for processing"
   MaxConnections:
     Type: Number
@@ -178,7 +178,9 @@ Resources:
   MessageStream:
     Type: AWS::Kinesis::Stream
     Properties:
-      ShardCount: 2
+      ShardCount: 4
+      StreamModeDetails:
+        StreamMode: PROVISIONED
 
   LambdaFunction:
     Type: AWS::Serverless::Function
@@ -232,8 +234,11 @@ Resources:
           Type: Kinesis
           Properties:
             Stream: !GetAtt MessageStream.Arn
-            BatchSize: !Ref BatchSize
+            BatchSize: 10
             StartingPosition: LATEST
+            MaximumBatchingWindowInSeconds: 1
+            ParallelizationFactor: 10
+            TumblingWindowInSeconds: 0
 
 Outputs:
   StreamARN:

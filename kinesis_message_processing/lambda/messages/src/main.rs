@@ -287,7 +287,7 @@ async fn function_handler(event: LambdaEvent<KinesisEvent>, pool: Arc<Mutex<Snow
         static PARSER_BUFFER: std::cell::RefCell<Vec<u8>> = std::cell::RefCell::new(Vec::with_capacity(4096));
     }
     
-    let mut partition_groups: HashMap<String, Vec<(String, &[u8], String)>> = HashMap::with_capacity(40);
+    let mut partition_groups: HashMap<String, Vec<(String, &[u8], String, f64)>> = HashMap::with_capacity(40);
 
     let grouping_start = std::time::Instant::now();
     for message in &event.payload.records {
@@ -306,11 +306,12 @@ async fn function_handler(event: LambdaEvent<KinesisEvent>, pool: Arc<Mutex<Snow
         
         let partition_key = message.kinesis.partition_key.clone();
         let data = message.kinesis.data.0.as_slice();
+        let kinesis_arrival_timestamp = message.kinesis.approximate_arrival_timestamp.0.timestamp() as f64;
 
         partition_groups
             .entry(partition_key.clone())
             .or_insert_with(|| Vec::with_capacity(get_env_usize("BATCH_SIZE", 200)))
-            .push((sequence_number, data, partition_key));
+            .push((sequence_number, data, partition_key, kinesis_arrival_timestamp));
     }
     
     let grouping_time = grouping_start.elapsed();
@@ -342,7 +343,7 @@ async fn function_handler(event: LambdaEvent<KinesisEvent>, pool: Arc<Mutex<Snow
             
             let mut failed_records = Vec::new();
 
-            for (sequence_number, data, partition_key) in records {
+            for (sequence_number, data, partition_key, kinesis_arrival_timestamp) in records {
                 let start_unfold_binary = std::time::Instant::now();
                 
                 let parse_result: Result<NewSensorReading, _> = from_slice(data);
@@ -352,15 +353,8 @@ async fn function_handler(event: LambdaEvent<KinesisEvent>, pool: Arc<Mutex<Snow
 
                 match parse_result {
                     Ok(sensor_reading) => {
-                        // Extract Kinesis timestamp for latency tracking
-                        // Check if timestamp is in seconds or milliseconds based on magnitude
-                        let kinesis_timestamp_ns = if sensor_reading.reading_timestamp > 1_000_000_000_000.0 {
-                            // Timestamp is in milliseconds
-                            (sensor_reading.reading_timestamp as u128) * 1_000_000
-                        } else {
-                            // Timestamp is in seconds
-                            (sensor_reading.reading_timestamp as u128) * 1_000_000_000
-                        };
+                        // Use Kinesis arrival timestamp for latency tracking
+                        let kinesis_timestamp_ns = (kinesis_arrival_timestamp as u128) * 1_000_000_000;
                         
                         match NewSensorReadingHandler::handle(&sensor_reading).await {
                             Ok(_) => {
