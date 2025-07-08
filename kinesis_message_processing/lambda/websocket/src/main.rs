@@ -167,18 +167,22 @@ impl WebSocketHandler {
             .unwrap()
             .as_nanos();
 
-        // First, ensure connection record exists
-        let mut item = HashMap::new();
-        item.insert("connection_id".to_string(), AttributeValue::S(connection_id.to_string()));
-        item.insert("connected_at_ns".to_string(), AttributeValue::N(now_ns.to_string()));
-        item.insert("subscribed_sensors".to_string(), AttributeValue::Ss(vec![sensor_id.to_string()]));
-        item.insert("last_activity_ns".to_string(), AttributeValue::N(now_ns.to_string()));
-        item.insert("ttl".to_string(), AttributeValue::N((now_ns / 1_000_000_000 + 3600).to_string()));
+        // Use UPDATE to add sensor to existing subscriptions
+        let mut key = HashMap::new();
+        key.insert("connection_id".to_string(), AttributeValue::S(connection_id.to_string()));
+
+        let mut expression_values = HashMap::new();
+        expression_values.insert(":sensor_set".to_string(), AttributeValue::Ss(vec![sensor_id.to_string()]));
+        expression_values.insert(":now_ns".to_string(), AttributeValue::N(now_ns.to_string()));
+        expression_values.insert(":ttl".to_string(), AttributeValue::N((now_ns / 1_000_000_000 + 3600).to_string()));
 
         match self.dynamo_client
-            .put_item()
+            .update_item()
             .table_name(&self.connection_table)
-            .set_item(Some(item))
+            .set_key(Some(key))
+            .update_expression("ADD subscribed_sensors :sensor_set SET last_activity_ns = :now_ns, #ttl = :ttl")
+            .expression_attribute_names("#ttl", "ttl")
+            .set_expression_attribute_values(Some(expression_values))
             .send()
             .await
         {
@@ -188,19 +192,46 @@ impl WebSocketHandler {
                     connection_id = connection_id,
                     sensor_id = sensor_id,
                     timestamp_ns = now_ns,
-                    "✓ Subscribed to sensor with nanosecond precision tracking"
+                    "✓ Added sensor to subscription list"
                 );
                 self.send_latest_readings(connection_id, sensor_id).await
             }
             Err(e) => {
-                error!(
-                    target: "websocket_subscription",
-                    connection_id = connection_id,
-                    sensor_id = sensor_id,
-                    error = %e,
-                    "❌ Failed to subscribe to sensor"
-                );
-                self.send_error(connection_id, "Failed to subscribe").await
+                // If record doesn't exist, create it
+                let mut item = HashMap::new();
+                item.insert("connection_id".to_string(), AttributeValue::S(connection_id.to_string()));
+                item.insert("connected_at_ns".to_string(), AttributeValue::N(now_ns.to_string()));
+                item.insert("subscribed_sensors".to_string(), AttributeValue::Ss(vec![sensor_id.to_string()]));
+                item.insert("last_activity_ns".to_string(), AttributeValue::N(now_ns.to_string()));
+                item.insert("ttl".to_string(), AttributeValue::N((now_ns / 1_000_000_000 + 3600).to_string()));
+
+                match self.dynamo_client
+                    .put_item()
+                    .table_name(&self.connection_table)
+                    .set_item(Some(item))
+                    .send()
+                    .await
+                {
+                    Ok(_) => {
+                        info!(
+                            target: "websocket_subscription",
+                            connection_id = connection_id,
+                            sensor_id = sensor_id,
+                            "✓ Created new subscription record"
+                        );
+                        self.send_latest_readings(connection_id, sensor_id).await
+                    }
+                    Err(e2) => {
+                        error!(
+                            target: "websocket_subscription",
+                            connection_id = connection_id,
+                            sensor_id = sensor_id,
+                            error = %e2,
+                            "❌ Failed to create subscription"
+                        );
+                        self.send_error(connection_id, "Failed to subscribe").await
+                    }
+                }
             }
         }
     }

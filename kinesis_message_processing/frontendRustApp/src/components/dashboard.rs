@@ -70,11 +70,25 @@ impl Component for Dashboard {
             }
             DashboardMsg::Subscribe => {
                 if let Some(service) = &self.ws_service {
+                    // Subscribe to common device IDs from your test
+                    let device_ids = ["device1", "device2", "device3", "device4", "device5", 
+                                     "device6", "device7", "device8", "device9", "device10"];
+                    for device_id in &device_ids {
+                        let _ = service.subscribe(device_id);
+                    }
+                    // Also subscribe to the manually entered sensor
                     let _ = service.subscribe(&self.selected_sensor);
                 }
                 false
             }
             DashboardMsg::WebSocketMessage(reading) => {
+                // Auto-subscribe to new devices
+                if !self.sensor_data.contains_key(&reading.sensor_id) {
+                    if let Some(service) = &self.ws_service {
+                        let _ = service.subscribe(&reading.sensor_id);
+                    }
+                }
+                
                 // Store latency metrics
                 let latency = LatencyMetrics {
                     kinesis_to_lambda_us: reading.kinesis_to_lambda_us,
@@ -172,9 +186,10 @@ impl Component for Dashboard {
                             {"Disconnect"}
                         </button>
                         <button onclick={subscribe_onclick} disabled={!self.connected}>
-                            {"Subscribe"}
+                            {"Subscribe All Devices"}
                         </button>
                     </div>
+                    <p><small>{"Note: New devices are automatically subscribed when they send data"}</small></p>
                 </div>
 
                 <div class="content">
