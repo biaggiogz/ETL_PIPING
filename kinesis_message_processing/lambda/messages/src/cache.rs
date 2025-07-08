@@ -26,9 +26,9 @@ impl DynamoCache {
         let connection_table = var("CONNECTION_TABLE_NAME")
             .unwrap_or_else(|_| "websocket_connections".to_string());
         let ttl_seconds = var("CACHE_TTL_SECONDS")
-            .unwrap_or_else(|_| "300".to_string())  // 5 minutes for testing
+            .unwrap_or_else(|_| "60".to_string())  // 5 minutes for testing
             .parse()
-            .unwrap_or(300);
+            .unwrap_or(60);
 
         let websocket_client = if let Ok(endpoint) = var("WEBSOCKET_API_ENDPOINT") {
             let config = aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await;

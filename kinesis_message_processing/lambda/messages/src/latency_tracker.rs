@@ -24,8 +24,16 @@ impl LatencyMetrics {
             .unwrap()
             .as_nanos();
 
+        // Calculate latency with bounds checking to prevent overflow
+        let kinesis_to_lambda_us = if lambda_start_ns > kinesis_timestamp_ns {
+            ((lambda_start_ns - kinesis_timestamp_ns) / 1000) as u64
+        } else {
+            warn!("Kinesis timestamp is in the future: {} vs {}", kinesis_timestamp_ns, lambda_start_ns);
+            0
+        };
+
         Self {
-            kinesis_to_lambda_us: ((lambda_start_ns - kinesis_timestamp_ns) / 1000) as u64,
+            kinesis_to_lambda_us,
             lambda_processing_us: 0,
             cache_write_us: 0,
             cache_to_websocket_us: 0,

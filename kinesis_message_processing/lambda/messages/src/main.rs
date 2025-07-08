@@ -353,7 +353,14 @@ async fn function_handler(event: LambdaEvent<KinesisEvent>, pool: Arc<Mutex<Snow
                 match parse_result {
                     Ok(sensor_reading) => {
                         // Extract Kinesis timestamp for latency tracking
-                        let kinesis_timestamp_ns = (sensor_reading.reading_timestamp as u128) * 1_000_000_000;
+                        // Check if timestamp is in seconds or milliseconds based on magnitude
+                        let kinesis_timestamp_ns = if sensor_reading.reading_timestamp > 1_000_000_000_000.0 {
+                            // Timestamp is in milliseconds
+                            (sensor_reading.reading_timestamp as u128) * 1_000_000
+                        } else {
+                            // Timestamp is in seconds
+                            (sensor_reading.reading_timestamp as u128) * 1_000_000_000
+                        };
                         
                         match NewSensorReadingHandler::handle(&sensor_reading).await {
                             Ok(_) => {
