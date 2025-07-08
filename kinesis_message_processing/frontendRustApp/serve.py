@@ -2,8 +2,16 @@
 import http.server
 import socketserver
 import os
+import socket
 
-PORT = 8000
+def find_free_port(start_port=8000):
+    for port in range(start_port, start_port + 100):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            if s.connect_ex(('localhost', port)) != 0:
+                return port
+    return None
+
+PORT = find_free_port()
 
 class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
     def end_headers(self):
@@ -13,7 +21,10 @@ class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
 
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
-with socketserver.TCPServer(("", PORT), MyHTTPRequestHandler) as httpd:
-    print(f"Serving at http://localhost:{PORT}")
-    print("Open your browser and navigate to the URL above")
-    httpd.serve_forever()
+if PORT:
+    with socketserver.TCPServer(("", PORT), MyHTTPRequestHandler) as httpd:
+        print(f"Serving at http://localhost:{PORT}")
+        print("Open your browser and navigate to the URL above")
+        httpd.serve_forever()
+else:
+    print("No available ports found")

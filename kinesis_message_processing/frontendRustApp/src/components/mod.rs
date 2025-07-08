@@ -1,7 +1,9 @@
 mod dashboard;
 mod sensor_card;
 mod latency_chart;
+mod speed_racing;
 
 pub use dashboard::Dashboard;
 pub use sensor_card::SensorCard;
 pub use latency_chart::LatencyChart;
+pub use speed_racing::SpeedRacing;
