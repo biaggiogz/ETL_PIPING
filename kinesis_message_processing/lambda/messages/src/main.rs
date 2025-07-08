@@ -353,15 +353,15 @@ async fn function_handler(event: LambdaEvent<KinesisEvent>, pool: Arc<Mutex<Snow
 
                 match parse_result {
                     Ok(sensor_reading) => {
-                        // Use Kinesis arrival timestamp for latency tracking
-                        let kinesis_timestamp_ns = (kinesis_arrival_timestamp as u128) * 1_000_000_000;
+                        // Use current time as Lambda start for latency tracking
+                        let lambda_start_ns = SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
                         
                         match NewSensorReadingHandler::handle(&sensor_reading).await {
                             Ok(_) => {
                                 // Start latency tracking
                                 {
                                     let mut tracker = latency_tracker_clone.lock().await;
-                                    tracker.start_tracking(partition_key.clone(), kinesis_timestamp_ns);
+                                    tracker.start_tracking(partition_key.clone(), lambda_start_ns);
                                 }
                                 
                                 // Cache the reading with latency tracking
@@ -395,8 +395,8 @@ async fn function_handler(event: LambdaEvent<KinesisEvent>, pool: Arc<Mutex<Snow
                                     }
                                     
                                     tracing::info!(
-                                        "✓ Cached reading for sensor {} in {:?} - Kinesis timestamp: {}ns", 
-                                        partition_key, cache_duration, kinesis_timestamp_ns
+                                        "✓ Cached reading for sensor {} in {:?} - Lambda start: {}ns", 
+                                        partition_key, cache_duration, lambda_start_ns
                                     );
                                 }
                             },

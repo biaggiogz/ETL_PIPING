@@ -27,4 +27,3 @@ Cargo.lock # Optional: only ignore if lockfile is not needed
 
 # Docker-specific
 .dockerignore
-Dockerfile
