@@ -12,11 +12,11 @@ extern "C" {
     #[wasm_bindgen(js_name = updateTemperatureRadialChart)]
     fn update_temperature_radial_chart(chart: &JsValue, bands: &js_sys::Array);
 
-    #[wasm_bindgen(js_name = initPerspectiveTable)]
-    fn init_perspective_table(element_id: &str) -> JsValue;
+    #[wasm_bindgen(js_name = initDeviceNetworkChart)]
+    fn init_device_network_chart(element_id: &str) -> JsValue;
     
-    #[wasm_bindgen(js_name = updatePerspectiveTable)]
-    fn update_perspective_table(table: &JsValue, data: &js_sys::Array);
+    #[wasm_bindgen(js_name = updateDeviceNetworkChart)]
+    fn update_device_network_chart(chart: &JsValue, devices: &js_sys::Array);
 }
 
 #[derive(Properties, PartialEq)]
@@ -26,7 +26,7 @@ pub struct TemperatureRadialProps {
 
 pub struct TemperatureRadial {
     chart_instance: Option<JsValue>,
-    perspective_table: Option<JsValue>,
+    network_chart: Option<JsValue>,
 }
 
 pub enum TemperatureRadialMsg {
@@ -41,7 +41,7 @@ impl Component for TemperatureRadial {
     fn create(_ctx: &Context<Self>) -> Self {
         Self {
             chart_instance: None,
-            perspective_table: None,
+            network_chart: None,
         }
     }
 
@@ -49,7 +49,7 @@ impl Component for TemperatureRadial {
         match msg {
             TemperatureRadialMsg::InitComponents => {
                 self.chart_instance = Some(init_temperature_radial_chart("temperatureRadialChart"));
-                self.perspective_table = Some(init_perspective_table("perspectiveViewer"));
+                self.network_chart = Some(init_device_network_chart("deviceNetworkChart"));
                 
                 // After initialization, update with current data if available
                 if !ctx.props().readings.is_empty() {
@@ -61,7 +61,7 @@ impl Component for TemperatureRadial {
                 false
             }
             TemperatureRadialMsg::UpdateData => {
-                if self.perspective_table.is_some() || self.chart_instance.is_some() {
+                if self.network_chart.is_some() || self.chart_instance.is_some() {
                     self.update_components(ctx);
                 }
                 false
@@ -78,15 +78,18 @@ impl Component for TemperatureRadial {
                 
                 <div class="radial-container">
                     <div class="perspective-panel">
-                        <h3>{"Perspective Aggregation (5°C Bands)"}</h3>
-                        <perspective-viewer id="perspectiveViewer"></perspective-viewer>
+                        <h3>{"Device Network (Lat/Lng + Neighbors)"}</h3>
+                        <div 
+                            id="deviceNetworkChart"
+                            onload={init_components}
+                        >
+                        </div>
                     </div>
                     
                     <div class="radial-chart-panel">
                         <h3>{"Temperature Radial Visualization"}</h3>
                         <div 
                             id="temperatureRadialChart"
-                            onload={init_components}
                         >
                         </div>
                     </div>
@@ -117,34 +120,32 @@ impl TemperatureRadial {
             return;
         }
         
-        // Aggregate temperature data into 5°C bands
+        // Prepare device data for network visualization
+        let mut device_data = Vec::new();
         let mut bands: HashMap<i32, Vec<String>> = HashMap::new();
-        let mut perspective_data = Vec::new();
         
         for (sensor_id, reading) in readings {
             let temp_band = ((reading.temperature / 5.0).floor() as i32) * 5;
             bands.entry(temp_band).or_insert_with(Vec::new).push(sensor_id.clone());
             
-            perspective_data.push(serde_json::json!({
+            device_data.push(serde_json::json!({
                 "sensor_id": sensor_id,
-                "temperature": reading.temperature,
-                "temp_band": format!("{}°C-{}°C", temp_band, temp_band + 5),
                 "latitude": reading.position.latitude,
                 "longitude": reading.position.longitude,
-                "speed_kms": reading.speed_kms
+                "temperature": reading.temperature
             }));
         }
         
-        // Update Perspective table with proper data format
-        if let Some(table) = &self.perspective_table {
+        // Update device network chart
+        if let Some(chart) = &self.network_chart {
             let data_array = js_sys::Array::new();
-            for item in perspective_data {
+            for item in device_data {
                 data_array.push(&JsValue::from_str(&item.to_string()));
             }
-            update_perspective_table(table, &data_array);
+            update_device_network_chart(chart, &data_array);
         }
         
-        // Update ECharts radial visualization
+        // Update temperature radial chart
         if let Some(chart) = &self.chart_instance {
             let bands_array = js_sys::Array::new();
             

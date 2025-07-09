@@ -41,7 +41,7 @@ impl Component for Dashboard {
             connected: false,
             sensor_data: HashMap::new(),
             latency_history: Vec::new(),
-            ws_url: "wss://your-websocket-endpoint.execute-api.region.amazonaws.com/prod".to_string(),
+            ws_url: "wss://icjs840cnh.execute-api.us-east-1.amazonaws.com/prod".to_string(),
             selected_sensor: "device1".to_string(),
             _interval: None,
         }
