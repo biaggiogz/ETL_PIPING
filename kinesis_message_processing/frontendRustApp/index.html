@@ -233,6 +233,44 @@
             width: 100%;
         }
 
+        .temperature-radial-section {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-top: 20px;
+        }
+
+        .radial-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-top: 20px;
+        }
+
+        .perspective-panel {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 6px;
+        }
+
+        .radial-chart-panel {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 6px;
+        }
+
+        #temperatureRadialChart {
+            width: 100%;
+            height: 400px;
+        }
+
+        @media (max-width: 768px) {
+            .radial-container {
+                grid-template-columns: 1fr;
+            }
+        }
+
         .latency-section h2 {
             color: #2c3e50;
             margin-bottom: 20px;
@@ -300,8 +338,11 @@
     <div id="app"></div>
     <script src="https://unpkg.com/@finos/perspective/dist/umd/perspective.js"></script>
     <script src="https://unpkg.com/@finos/perspective-viewer/dist/umd/perspective-viewer.js"></script>
+    <script src="https://unpkg.com/@finos/perspective-viewer-datagrid/dist/umd/perspective-viewer-datagrid.js"></script>
+    <link rel="stylesheet" crossorigin="anonymous" href="https://unpkg.com/@finos/perspective-viewer/dist/css/themes.css" />
     <script src="https://unpkg.com/echarts/dist/echarts.min.js"></script>
     <script src="speed_racing.js"></script>
+    <script src="temperature_radial.js"></script>
     <script type="module">
         import init from './pkg/sensor_dashboard.js';
         init();

@@ -4,7 +4,7 @@ use gloo::timers::callback::Interval;
 
 use crate::types::{RealTimeReading, LatencyMetrics};
 use crate::websocket::WebSocketService;
-use super::{SensorCard, LatencyChart, SpeedRacing};
+use super::{SensorCard, LatencyChart, SpeedRacing, TemperatureRadial};
 
 #[derive(Properties, PartialEq)]
 pub struct DashboardProps {}
@@ -207,6 +207,8 @@ impl Component for Dashboard {
                     </div>
 
                     <SpeedRacing readings={self.sensor_data.clone()} />
+
+                    <TemperatureRadial readings={self.sensor_data.clone()} />
                 </div>
             </div>
         }
