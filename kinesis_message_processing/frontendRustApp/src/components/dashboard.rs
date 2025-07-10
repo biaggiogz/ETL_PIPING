@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use yew::prelude::*;
 use gloo::timers::callback::Interval;
+use web_sys::window;
 
 use crate::types::{RealTimeReading, LatencyMetrics};
 use crate::websocket::WebSocketService;
@@ -17,6 +18,9 @@ pub struct Dashboard {
     ws_url: String,
     selected_sensor: String,
     _interval: Option<Interval>,
+    pending_updates: Vec<RealTimeReading>,
+    last_render: f64,
+    render_throttle_ms: f64,
 }
 
 pub enum DashboardMsg {
@@ -29,13 +33,20 @@ pub enum DashboardMsg {
     WebSocketClose,
     UpdateSensorId(String),
     UpdateWsUrl(String),
+    ProcessPendingUpdates,
 }
 
 impl Component for Dashboard {
     type Message = DashboardMsg;
     type Properties = DashboardProps;
 
-    fn create(_ctx: &Context<Self>) -> Self {
+    fn create(ctx: &Context<Self>) -> Self {
+        // Set up render throttling interval
+        let link = ctx.link().clone();
+        let interval = Interval::new(16, move || { // ~60fps
+            link.send_message(DashboardMsg::ProcessPendingUpdates);
+        });
+        
         Self {
             ws_service: None,
             connected: false,
@@ -43,7 +54,10 @@ impl Component for Dashboard {
             latency_history: Vec::new(),
             ws_url: "wss://icjs840cnh.execute-api.us-east-1.amazonaws.com/prod".to_string(),
             selected_sensor: "device1".to_string(),
-            _interval: None,
+            _interval: Some(interval),
+            pending_updates: Vec::new(),
+            last_render: 0.0,
+            render_throttle_ms: 16.0, // 60fps
         }
     }
 
@@ -89,24 +103,56 @@ impl Component for Dashboard {
                     }
                 }
                 
-                // Store latency metrics
-                let latency = LatencyMetrics {
-                    kinesis_to_lambda_us: reading.kinesis_to_lambda_us,
-                    lambda_processing_us: reading.lambda_processing_us,
-                    cache_to_websocket_us: reading.cache_to_websocket_us,
-                    websocket_to_frontend_us: reading.websocket_to_frontend_us,
-                    total_pipeline_us: reading.kinesis_to_lambda_us + reading.lambda_processing_us + 
-                                      reading.cache_to_websocket_us + reading.websocket_to_frontend_us,
-                    timestamp: js_sys::Date::now(),
-                };
+                // Add to pending updates instead of immediate processing
+                self.pending_updates.push(reading);
                 
-                self.latency_history.push(latency);
-                if self.latency_history.len() > 100 {
-                    self.latency_history.remove(0);
+                // Limit pending updates to prevent memory issues
+                if self.pending_updates.len() > 1000 {
+                    self.pending_updates.drain(0..500); // Keep only latest 500
                 }
-
-                self.sensor_data.insert(reading.sensor_id.clone(), reading);
-                true
+                
+                false // Don't trigger re-render yet
+            }
+            DashboardMsg::ProcessPendingUpdates => {
+                if self.pending_updates.is_empty() {
+                    return false;
+                }
+                
+                let now = window().unwrap().performance().unwrap().now();
+                if now - self.last_render < self.render_throttle_ms {
+                    return false; // Skip this update cycle
+                }
+                
+                // Process all pending updates in batch
+                let mut should_render = false;
+                for reading in self.pending_updates.drain(..) {
+                    // Store latency metrics (only keep recent ones)
+                    let latency = LatencyMetrics {
+                        kinesis_to_lambda_us: reading.kinesis_to_lambda_us,
+                        lambda_processing_us: reading.lambda_processing_us,
+                        cache_to_websocket_us: reading.cache_to_websocket_us,
+                        websocket_to_frontend_us: reading.websocket_to_frontend_us,
+                        total_pipeline_us: reading.kinesis_to_lambda_us + reading.lambda_processing_us + 
+                                          reading.cache_to_websocket_us + reading.websocket_to_frontend_us,
+                        timestamp: now,
+                    };
+                    
+                    self.latency_history.push(latency);
+                    self.sensor_data.insert(reading.sensor_id.clone(), reading);
+                    should_render = true;
+                }
+                
+                // Cleanup old latency history more aggressively
+                if self.latency_history.len() > 50 {
+                    let keep_count = 30;
+                    self.latency_history.drain(0..self.latency_history.len() - keep_count);
+                }
+                
+                if should_render {
+                    self.last_render = now;
+                }
+                
+                should_render
             }
             DashboardMsg::WebSocketError(error) => {
                 web_sys::console::error_1(&error.into());

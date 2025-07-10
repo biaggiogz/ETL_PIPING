@@ -28,4 +28,6 @@ features = [
   "BinaryType",
   "HtmlCanvasElement",
   "CanvasRenderingContext2d",
+  "Performance",
+  "Window",
 ]

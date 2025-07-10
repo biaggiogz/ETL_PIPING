@@ -45,15 +45,12 @@ impl WebSocketService {
         let onmessage_closure = Closure::wrap(Box::new(move |e: MessageEvent| {
             if let Ok(txt) = e.data().dyn_into::<js_sys::JsString>() {
                 let data = String::from(txt);
-                if let Ok(reading) = serde_json::from_str::<RealTimeReading>(&data) {
-                    // Calculate frontend receive timestamp
-                    let frontend_timestamp_ns = js_sys::Date::now() as u128 * 1_000_000;
-                    let mut reading_with_frontend = reading.clone();
-                    reading_with_frontend.websocket_to_frontend_us = 
-                        ((frontend_timestamp_ns - reading.notification_timestamp_ns) / 1000) as u64;
-                    onmessage_callback.emit(reading_with_frontend);
-                } else if let Ok(_value) = serde_json::from_str::<Value>(&data) {
-                    web_sys::console::log_1(&format!("Received: {}", data).into());
+                if let Ok(mut reading) = serde_json::from_str::<RealTimeReading>(&data) {
+                    // Calculate frontend receive timestamp more efficiently
+                    let frontend_timestamp_ns = (js_sys::Date::now() * 1000.0) as u128 * 1_000;
+                    reading.websocket_to_frontend_us = 
+                        ((frontend_timestamp_ns.saturating_sub(reading.notification_timestamp_ns)) / 1000) as u64;
+                    onmessage_callback.emit(reading);
                 }
             }
         }) as Box<dyn FnMut(MessageEvent)>);

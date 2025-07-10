@@ -6,9 +6,19 @@ if ! command -v wasm-pack &> /dev/null; then
     curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 fi
 
-# Build the WebAssembly package
-echo "Building WebAssembly package..."
-wasm-pack build --target web --out-dir pkg
+# Build the WebAssembly package with optimizations
+echo "Building optimized WebAssembly package..."
+export RUSTFLAGS="-C opt-level=3"
+wasm-pack build --target web --out-dir pkg --release
+
+# Optimize the wasm binary if wasm-opt is available
+if command -v wasm-opt &> /dev/null; then
+    echo "Optimizing WASM binary for size and speed..."
+    wasm-opt -Oz --enable-simd pkg/sensor_dashboard_bg.wasm -o pkg/sensor_dashboard_bg.wasm
+    echo "✅ WASM binary optimized!"
+else
+    echo "⚠️  wasm-opt not found. Install binaryen for better optimization."
+fi
 
 # Create a simple HTTP server script
 cat > serve.py << 'EOF'
