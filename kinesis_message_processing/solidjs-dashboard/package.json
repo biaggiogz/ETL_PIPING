@@ -1,0 +1,21 @@
+{
+  "name": "solidjs-iot-dashboard",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "serve": "vite preview"
+  },
+  "dependencies": {
+    "solid-js": "^1.8.0",
+    "@duckdb/duckdb-wasm": "^1.28.0",
+    "echarts": "^5.4.3",
+    "apache-arrow": "^14.0.1"
+  },
+  "devDependencies": {
+    "vite": "^5.0.0",
+    "vite-plugin-solid": "^2.8.0",
+    "@types/node": "^20.0.0"
+  }
+}
