@@ -13,6 +13,10 @@ class WebSocketClient {
     constructor(table) {
         this.table = table;
         this.ws = null;
+        this.updateBatch = [];
+        this.batchSize = 50; // Batch updates for performance
+        this.flushInterval = 25; // Flush every 25ms for high-speed streams
+        this.startBatchProcessor();
     }
 
     connect() {
@@ -43,10 +47,18 @@ class WebSocketClient {
         });
     }
 
+    startBatchProcessor() {
+        setInterval(() => {
+            if (this.updateBatch.length > 0) {
+                this.table.update(this.updateBatch);
+                this.updateBatch = [];
+            }
+        }, this.flushInterval);
+    }
+
     handleMessage(message) {
         try {
             const data = JSON.parse(message);
-            console.log(`📊 Parsed data:`, data);
             
             if (data.type === "real_time_reading") {
                 const formattedData = {
@@ -59,15 +71,17 @@ class WebSocketClient {
                     total_pipeline_us: data.total_pipeline_us,
                     timestamp: new Date(data.reading_timestamp_ms).toISOString()
                 };
-                console.log(`🔄 Updating table with:`, formattedData);
-                this.table.update([formattedData]);
-                console.log(`✅ Table updated successfully`);
-            } else {
-                console.log(`ℹ️ Received non-realtime message:`, data);
+                
+                this.updateBatch.push(formattedData);
+                
+                // Force flush if batch is full
+                if (this.updateBatch.length >= this.batchSize) {
+                    this.table.update(this.updateBatch);
+                    this.updateBatch = [];
+                }
             }
         } catch (error) {
             console.error('❌ Error processing message:', error);
-            console.error('Raw message was:', message);
         }
     }
 }
@@ -88,8 +102,7 @@ async function createPerspectiveTable() {
     };
     const table = await perspective.table(schema, {
         name: PERSPECTIVE_TABLE_NAME,
-        limit: 2500,
-        format: "json"
+        limit: 5000
     });
     console.log(`Created Perspective table: '${PERSPECTIVE_TABLE_NAME}'`);
     return table;
@@ -102,6 +115,19 @@ async function main() {
     // Create a Perspective WebSocket server
     const server = new perspective.WebSocketServer({ port: 8081 });
     console.log("Perspective WebSocket server is running on ws://localhost:8081/websocket");
+
+    // Handle graceful shutdown to free port 8081
+    process.on('SIGINT', () => {
+        console.log('\n🛑 Received SIGINT, shutting down gracefully...');
+        server.close();
+        process.exit(0);
+    });
+
+    process.on('SIGTERM', () => {
+        console.log('\n🛑 Received SIGTERM, shutting down gracefully...');
+        server.close();
+        process.exit(0);
+    });
 
     // Create the Perspective table
     const table = await createPerspectiveTable();

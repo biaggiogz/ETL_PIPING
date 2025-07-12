@@ -31,20 +31,17 @@
 
             import perspective from "https://cdn.jsdelivr.net/npm/@finos/perspective@3.4.3/dist/cdn/perspective.js";
 
-            // get perspective-viewer element
             const viewer = document.getElementById("viewer");
 
-            // connect to pserpective server websocket and retrieve table
-            const tableName     = "sensor_data";
-            const websocket     = await perspective.websocket("ws://localhost:8081/websocket");
-            const server_table  = await websocket.open_table(tableName)
-            const server_view   = await server_table.view();
+            const websocket = await perspective.websocket("ws://localhost:8081/websocket");
+            const server_table = await websocket.open_table("sensor_data");
+            const server_view = await server_table.view();
 
-            const worker        = await perspective.worker();
-            const client_table  = await worker.table(server_view);
+            const worker = await perspective.worker();
+            const client_table = await worker.table(server_view);
             await viewer.load(client_table);
 
-            // pre-configure the perspective viewer
+            // Optimized config for performance
             const viewer_config = {
                 plugin: "Datagrid",
                 plugin_config: {
@@ -52,14 +49,10 @@
                     edit_mode: "READ_ONLY",
                     scroll_lock: false
                 },
-                columns_config: {},
                 settings: true,
                 theme: "Pro Dark",
                 title: "Sensor Data",
-                group_by: [],
-                split_by: [],
                 columns: ["sensor_id", "temperature", "latitude", "longitude", "speed_kms", "connection_speed_mbps", "total_pipeline_us", "timestamp"],
-                filter: [],
                 sort: [["timestamp", "desc"]],
                 expressions: {},
                 aggregates: {}
