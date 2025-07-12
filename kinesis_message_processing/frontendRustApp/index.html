@@ -3,6 +3,8 @@
 <head>
     <meta charset="utf-8" />
     <title>Sensor Dashboard</title>
+    <link rel="preload" href="https://cdn.jsdelivr.net/npm/@finos/perspective@3.4.3/dist/wasm/perspective-server.wasm" as="fetch" type="application/wasm" crossorigin="anonymous" />
+    <link rel="preload" href="https://cdn.jsdelivr.net/npm/@finos/perspective-viewer@3.4.3/dist/wasm/perspective-viewer.wasm" as="fetch" type="application/wasm" crossorigin="anonymous" />
     <style>
         * {
             margin: 0;
@@ -229,7 +231,20 @@
         }
 
         perspective-viewer {
-            height: 300px;
+            height: 500px;
+            width: 100%;
+        }
+        
+        #perspective-container {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-top: 20px;
+        }
+        
+        #sensor-viewer {
+            height: 500px;
             width: 100%;
         }
 
@@ -341,19 +356,70 @@
 </head>
 <body>
     <div id="app"></div>
-    <script src="https://unpkg.com/@finos/perspective/dist/umd/perspective.js"></script>
-    <script src="https://unpkg.com/@finos/perspective-viewer/dist/umd/perspective-viewer.js"></script>
-    <script src="https://unpkg.com/@finos/perspective-viewer-datagrid/dist/umd/perspective-viewer-datagrid.js"></script>
-    <link rel="stylesheet" crossorigin="anonymous" href="https://unpkg.com/@finos/perspective-viewer/dist/css/themes.css" />
-    <script src="perspective_integration.js"></script>
+    
+    <div id="perspective-container">
+        <h2>Interactive Sensor Grid</h2>
+        <perspective-viewer id="sensor-viewer"></perspective-viewer>
+    </div>
+    <link rel="stylesheet" crossorigin="anonymous" href="https://cdn.jsdelivr.net/npm/@finos/perspective-viewer@3.4.3/dist/css/themes.css" />
     <script src="https://unpkg.com/echarts/dist/echarts.min.js"></script>
     <script src="speed_racing.js"></script>
     <script src="temperature_radial.js"></script>
     <script src="device_network.js"></script>
     <script src="optimize_performance.js"></script>
     <script type="module">
+        import "https://cdn.jsdelivr.net/npm/@finos/perspective-viewer@3.4.3/dist/cdn/perspective-viewer.js";
+        import "https://cdn.jsdelivr.net/npm/@finos/perspective-viewer-datagrid@3.4.3/dist/cdn/perspective-viewer-datagrid.js";
+        import perspective from "https://cdn.jsdelivr.net/npm/@finos/perspective@3.4.3/dist/cdn/perspective.js";
+        
         import init from './pkg/sensor_dashboard.js';
-        init();
+        
+        // Initialize Rust app
+        await init();
+        
+        // Initialize Perspective
+        const viewer = document.getElementById('sensor-viewer');
+        const worker = await perspective.worker();
+        const table = await worker.table({
+            sensor_id: 'string',
+            temperature: 'float',
+            latitude: 'float',
+            longitude: 'float',
+            speed_kms: 'float',
+            connection_speed_mbps: 'float',
+            total_pipeline_us: 'integer',
+            timestamp: 'datetime'
+        });
+        
+        await viewer.load(table);
+        await viewer.restore({
+            plugin: 'Datagrid',
+            group_by: ['sensor_id'],
+            columns: ['sensor_id', 'temperature', 'latitude', 'longitude', 'speed_kms', 'total_pipeline_us'],
+            aggregates: {
+                temperature: 'avg',
+                speed_kms: 'avg',
+                total_pipeline_us: 'avg'
+            },
+            sort: [['timestamp', 'desc']]
+        });
+        
+        // Listen for sensor data
+        window.addEventListener('sensorData', (event) => {
+            if (event.detail) {
+                const data = typeof event.detail === 'string' ? JSON.parse(event.detail) : event.detail;
+                table.update([{
+                    sensor_id: data.sensor_id,
+                    temperature: data.temperature,
+                    latitude: data.position ? data.position.latitude : data.latitude,
+                    longitude: data.position ? data.position.longitude : data.longitude,
+                    speed_kms: data.speed_kms,
+                    connection_speed_mbps: data.connection_speed_mbps,
+                    total_pipeline_us: data.total_pipeline_us,
+                    timestamp: new Date(data.reading_timestamp_ms)
+                }]);
+            }
+        });
     </script>
 </body>
 </html>
