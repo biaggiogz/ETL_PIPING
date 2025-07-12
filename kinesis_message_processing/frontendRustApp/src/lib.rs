@@ -4,7 +4,6 @@ use wasm_bindgen::prelude::*;
 mod components;
 mod websocket;
 mod types;
-mod perspective_service;
 
 use components::Dashboard;
 

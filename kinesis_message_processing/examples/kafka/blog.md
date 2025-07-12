@@ -81,7 +81,6 @@ cd perspective-examples
 source venv/bin/activate
 
 cd examples/kafka
-python perspective_server.py
 ```
 
 You can kill the server at any point with CTRL + C.

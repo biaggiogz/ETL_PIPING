@@ -77,7 +77,7 @@ impl Component for TemperatureRadial {
                 <h2>{"Temperature Distribution Dashboard"}</h2>
                 
                 <div class="radial-container">
-                    <div class="perspective-panel">
+                    <div class="network-panel">
                         <h3>{"Device Network (Lat/Lng + Neighbors)"}</h3>
                         <div 
                             id="deviceNetworkChart"

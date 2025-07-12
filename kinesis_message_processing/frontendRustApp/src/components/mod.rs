@@ -3,7 +3,6 @@ mod sensor_card;
 mod latency_chart;
 mod speed_racing;
 mod temperature_radial;
-mod perspective_viewer;
 
 pub use dashboard::Dashboard;
 pub use sensor_card::SensorCard;
