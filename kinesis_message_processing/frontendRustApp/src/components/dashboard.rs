@@ -103,8 +103,19 @@ impl Component for Dashboard {
                     }
                 }
                 
-                // Add to pending updates instead of immediate processing
-                self.pending_updates.push(reading);
+                // Add to pending updates and emit event for Perspective
+                self.pending_updates.push(reading.clone());
+                
+                // Emit custom event for Perspective integration
+                if let Some(window) = web_sys::window() {
+                    if let Ok(event) = web_sys::CustomEvent::new("sensorData") {
+                        let detail = serde_json::to_string(&reading).unwrap_or_default();
+                        let _ = event.init_custom_event_with_can_bubble_and_cancelable_and_detail(
+                            "sensorData", true, false, &wasm_bindgen::JsValue::from_str(&detail)
+                        );
+                        let _ = window.dispatch_event(&event);
+                    }
+                }
                 
                 // Limit pending updates to prevent memory issues
                 if self.pending_updates.len() > 1000 {
@@ -255,6 +266,20 @@ impl Component for Dashboard {
                     <SpeedRacing readings={self.sensor_data.clone()} />
 
                     <TemperatureRadial readings={self.sensor_data.clone()} />
+
+                    <div id="perspective-container">
+                        <h2>{"Interactive Sensor Grid"}</h2>
+                        <perspective-viewer 
+                            id="sensor-viewer"
+                            plugin="Datagrid"
+                            columns={r#"["sensor_id", "temperature", "latitude", "longitude", "speed_kms", "total_pipeline_us"]"#}
+                            aggregates={r#"{"temperature": "avg", "speed_kms": "avg", "total_pipeline_us": "avg"}"#}
+                            group-by={r#"["sensor_id"]"#}
+                            style="height: 500px; width: 100%;"
+                        />
+                    </div>
+
+
                 </div>
             </div>
         }
