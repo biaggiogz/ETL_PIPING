@@ -80,7 +80,6 @@ fn render_chart(element: &web_sys::Element, history: &[LatencyMetrics]) {
     
     // Title
     let title = js_sys::Object::new();
-    js_sys::Reflect::set(&title, &"text".into(), &"Pipeline Latency Breakdown".into()).unwrap();
     js_sys::Reflect::set(&option, &"title".into(), &title).unwrap();
     
     // Tooltip

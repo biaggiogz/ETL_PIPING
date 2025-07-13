@@ -115,10 +115,55 @@
             gap: 20px;
         }
 
-        .sensors-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
-            gap: 20px;
+        .tabular-card {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+
+        .tabular-card h3 {
+            color: #2c3e50;
+            margin-bottom: 15px;
+            font-size: 18px;
+        }
+
+        .table-container {
+            overflow-x: auto;
+        }
+
+        .sensor-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 14px;
+        }
+
+        .sensor-table th,
+        .sensor-table td {
+            padding: 12px 8px;
+            text-align: left;
+            border-bottom: 1px solid #eee;
+        }
+
+        .sensor-table th {
+            background: #f8f9fa;
+            font-weight: 600;
+            color: #555;
+        }
+
+        .sensor-table .sensor-id {
+            font-weight: 600;
+            color: #2c3e50;
+        }
+
+        .sensor-table .latency {
+            color: #4CAF50;
+            font-weight: 500;
+        }
+
+        .sensor-table tr:hover {
+            background: #f8f9fa;
         }
 
         .sensor-card {
@@ -233,6 +278,7 @@
         perspective-viewer {
             height: 500px;
             width: 100%;
+            display: block;
         }
         
         #perspective-container {
@@ -344,8 +390,13 @@
                 text-align: center;
             }
             
-            .sensors-grid {
-                grid-template-columns: 1fr;
+            .table-container {
+                font-size: 12px;
+            }
+            
+            .sensor-table th,
+            .sensor-table td {
+                padding: 8px 4px;
             }
             
             .button-group {
@@ -405,19 +456,23 @@
         });
         
         // Listen for sensor data
-        window.addEventListener('sensorData', (event) => {
+        window.addEventListener('sensorData', async (event) => {
             if (event.detail) {
-                const data = typeof event.detail === 'string' ? JSON.parse(event.detail) : event.detail;
-                table.update([{
-                    sensor_id: data.sensor_id,
-                    temperature: data.temperature,
-                    latitude: data.position ? data.position.latitude : data.latitude,
-                    longitude: data.position ? data.position.longitude : data.longitude,
-                    speed_kms: data.speed_kms,
-                    connection_speed_mbps: data.connection_speed_mbps,
-                    total_pipeline_us: data.total_pipeline_us,
-                    timestamp: new Date(data.reading_timestamp_ms)
-                }]);
+                try {
+                    const data = typeof event.detail === 'string' ? JSON.parse(event.detail) : event.detail;
+                    await table.update([{
+                        sensor_id: data.sensor_id || 'unknown',
+                        temperature: parseFloat(data.temperature) || 0,
+                        latitude: data.position ? parseFloat(data.position.latitude) : parseFloat(data.latitude) || 0,
+                        longitude: data.position ? parseFloat(data.position.longitude) : parseFloat(data.longitude) || 0,
+                        speed_kms: parseFloat(data.speed_kms) || 0,
+                        connection_speed_mbps: parseFloat(data.connection_speed_mbps) || 0,
+                        total_pipeline_us: parseInt(data.total_pipeline_us) || 0,
+                        timestamp: new Date(data.reading_timestamp_ms || Date.now())
+                    }]);
+                } catch (error) {
+                    console.error('Error updating Perspective table:', error, event.detail);
+                }
             }
         });
     </script>

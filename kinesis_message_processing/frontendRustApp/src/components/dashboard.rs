@@ -5,7 +5,7 @@ use web_sys::window;
 
 use crate::types::{RealTimeReading, LatencyMetrics};
 use crate::websocket::WebSocketService;
-use super::{SensorCard, LatencyChart, SpeedRacing, TemperatureRadial};
+use super::{TabularCard, LatencyChart, SpeedRacing, TemperatureRadial};
 
 #[derive(Properties, PartialEq)]
 pub struct DashboardProps {}
@@ -250,13 +250,7 @@ impl Component for Dashboard {
                 </div>
 
                 <div class="content">
-                    <div class="sensors-grid">
-                        {for self.sensor_data.values().map(|reading| {
-                            html! {
-                                <SensorCard reading={reading.clone()} />
-                            }
-                        })}
-                    </div>
+                    <TabularCard readings={self.sensor_data.clone()} />
 
                     <div class="latency-section">
                         <h2>{"Pipeline Latency Metrics"}</h2>
