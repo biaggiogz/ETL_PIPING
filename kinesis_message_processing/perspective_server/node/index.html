@@ -33,7 +33,7 @@
 
             const viewer = document.getElementById("viewer");
 
-            const websocket = await perspective.websocket("ws://localhost:8081/websocket");
+            const websocket = await perspective.websocket(`ws://${window.location.hostname}:8081/websocket`);
             const server_table = await websocket.open_table("sensor_data");
             const server_view = await server_table.view();
 
