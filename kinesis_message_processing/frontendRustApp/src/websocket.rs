@@ -46,10 +46,10 @@ impl WebSocketService {
             if let Ok(txt) = e.data().dyn_into::<js_sys::JsString>() {
                 let data = String::from(txt);
                 if let Ok(mut reading) = serde_json::from_str::<RealTimeReading>(&data) {
-                    // Calculate frontend receive timestamp more efficiently
-                    let frontend_timestamp_ns = (js_sys::Date::now() * 1000.0) as u128 * 1_000;
+                    // Calculate frontend receive timestamp in nanoseconds
+                    let frontend_timestamp_ns = (js_sys::Date::now() * 1_000_000.0) as u128;
                     reading.websocket_to_frontend_us = 
-                        ((frontend_timestamp_ns.saturating_sub(reading.notification_timestamp_ns)) / 1000) as u64;
+                        frontend_timestamp_ns.saturating_sub(reading.notification_timestamp_ns) as u64 / 1000;
                     onmessage_callback.emit(reading);
                 }
             }
