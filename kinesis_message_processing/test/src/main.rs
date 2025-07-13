@@ -56,16 +56,18 @@ async fn run_kinesis_test(kinesis_client: Client, stream_arn: &String) {
     let device_10 = IoTDevice::new("device10".to_string());
 
     loop {
-        device_1.send_temperature_data(&kinesis_client, stream_arn).await;
-        device_2.send_temperature_data(&kinesis_client, stream_arn).await;
-        device_3.send_temperature_data(&kinesis_client, stream_arn).await;
-        device_4.send_temperature_data(&kinesis_client, stream_arn).await;
-        device_5.send_temperature_data(&kinesis_client, stream_arn).await;
-        device_6.send_temperature_data(&kinesis_client, stream_arn).await;
-        device_7.send_temperature_data(&kinesis_client, stream_arn).await;
-        device_8.send_temperature_data(&kinesis_client, stream_arn).await;
-        device_9.send_temperature_data(&kinesis_client, stream_arn).await;
-        device_10.send_temperature_data(&kinesis_client, stream_arn).await;
+        tokio::join!(
+            device_1.send_temperature_data(&kinesis_client, stream_arn),
+            device_2.send_temperature_data(&kinesis_client, stream_arn),
+            device_3.send_temperature_data(&kinesis_client, stream_arn),
+            device_4.send_temperature_data(&kinesis_client, stream_arn),
+            device_5.send_temperature_data(&kinesis_client, stream_arn),
+            device_6.send_temperature_data(&kinesis_client, stream_arn),
+            device_7.send_temperature_data(&kinesis_client, stream_arn),
+            device_8.send_temperature_data(&kinesis_client, stream_arn),
+            device_9.send_temperature_data(&kinesis_client, stream_arn),
+            device_10.send_temperature_data(&kinesis_client, stream_arn)
+        );
 
         sleep(Duration::from_secs(1)).await;
     }
