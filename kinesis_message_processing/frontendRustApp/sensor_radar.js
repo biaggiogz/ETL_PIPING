@@ -80,7 +80,7 @@ window.updateSensorRadarChart = function(chart, sensorsArray) {
         
         if (sensors.length === 0) return;
         
-        const colors = ['#F9713C', '#B3E4A1', 'rgb(238, 197, 102)', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF6B6B'];
+        const colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#F9713C', '#FECA57', '#96CEB4', '#9B59B6', '#E67E22', '#2ECC71', '#3498DB', '#E74C3C', '#F39C12'];
         const legendData = [];
         const series = [];
         

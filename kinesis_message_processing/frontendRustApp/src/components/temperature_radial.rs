@@ -11,12 +11,6 @@ extern "C" {
     
     #[wasm_bindgen(js_name = updateSensorRadarChart)]
     fn update_sensor_radar_chart(chart: &JsValue, sensors: &js_sys::Array);
-
-    #[wasm_bindgen(js_name = initDeviceNetworkChart)]
-    fn init_device_network_chart(element_id: &str) -> JsValue;
-    
-    #[wasm_bindgen(js_name = updateDeviceNetworkChart)]
-    fn update_device_network_chart(chart: &JsValue, devices: &js_sys::Array);
 }
 
 #[derive(Properties, PartialEq)]
@@ -26,7 +20,6 @@ pub struct TemperatureRadialProps {
 
 pub struct TemperatureRadial {
     radar_chart: Option<JsValue>,
-    network_chart: Option<JsValue>,
 }
 
 pub enum TemperatureRadialMsg {
@@ -41,7 +34,6 @@ impl Component for TemperatureRadial {
     fn create(_ctx: &Context<Self>) -> Self {
         Self {
             radar_chart: None,
-            network_chart: None,
         }
     }
 
@@ -49,7 +41,6 @@ impl Component for TemperatureRadial {
         match msg {
             TemperatureRadialMsg::InitComponents => {
                 self.radar_chart = Some(init_sensor_radar_chart("sensorRadarChart"));
-                self.network_chart = Some(init_device_network_chart("deviceNetworkChart"));
                 
                 if !ctx.props().readings.is_empty() {
                     let link = ctx.link().clone();
@@ -73,22 +64,12 @@ impl Component for TemperatureRadial {
             <div class="temperature-radial-section">
                 <h2>{"Sensor Multi-Dimensional Analysis"}</h2>
                 
-                <div class="radial-container">
-                    <div class="network-panel">
-                        <h3>{"Device Network Visualization"}</h3>
-                        <div 
-                            id="deviceNetworkChart"
-                            onload={init_components}
-                        >
-                        </div>
-                    </div>
-                    
-                    <div class="radial-chart-panel">
-                        <h3>{"Sensor Metrics Radar"}</h3>
-                        <div 
-                            id="sensorRadarChart"
-                        >
-                        </div>
+                <div class="radar-full-container">
+                    <h3>{"Sensor Metrics Radar"}</h3>
+                    <div 
+                        id="sensorRadarChart"
+                        onload={init_components}
+                    >
                     </div>
                 </div>
             </div>
@@ -115,23 +96,6 @@ impl TemperatureRadial {
             return;
         }
         
-        // Update device network chart
-        if let Some(chart) = &self.network_chart {
-            let device_data = js_sys::Array::new();
-            for (sensor_id, reading) in readings {
-                let data = serde_json::json!({
-                    "sensor_id": sensor_id,
-                    "latitude": reading.position.latitude,
-                    "longitude": reading.position.longitude,
-                    "temperature": reading.temperature,
-                    "reading_timestamp_ms": reading.reading_timestamp_ms
-                });
-                device_data.push(&JsValue::from_str(&data.to_string()));
-            }
-            update_device_network_chart(chart, &device_data);
-        }
-        
-        // Update radar chart
         if let Some(chart) = &self.radar_chart {
             let sensor_data = js_sys::Array::new();
             for (sensor_id, reading) in readings {
