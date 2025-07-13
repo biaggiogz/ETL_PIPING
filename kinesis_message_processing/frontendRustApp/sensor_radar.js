@@ -73,29 +73,15 @@ window.updateSensorRadarChart = function(chart, sensorsArray) {
     if (!chart || !sensorsArray) return;
     
     try {
-        const sensors = [];
-        for (let i = 0; i < sensorsArray.length; i++) {
-            sensors.push(JSON.parse(sensorsArray[i]));
-        }
-        
-        if (sensors.length === 0) return;
+        if (sensorsArray.length === 0) return;
         
         const colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#F9713C', '#FECA57', '#96CEB4', '#9B59B6', '#E67E22', '#2ECC71', '#3498DB', '#E74C3C', '#F39C12'];
         const legendData = [];
         const series = [];
         
-        sensors.forEach((sensor, index) => {
-            const total_latency = sensor.kinesis_to_lambda_us + sensor.lambda_processing_us + 
-                                 sensor.cache_to_websocket_us + sensor.websocket_to_frontend_us;
-            
-            const data = [
-                sensor.temperature,
-                sensor.speed_kms,
-                sensor.connection_speed_mbps,
-                total_latency / 100, // Scale down latency for visualization
-                Math.abs(sensor.position.latitude),
-                Math.abs(sensor.position.longitude)
-            ];
+        // Process pre-calculated data from WASM
+        for (let i = 0; i < sensorsArray.length; i++) {
+            const sensor = sensorsArray[i];
             
             legendData.push(sensor.sensor_id);
             
@@ -106,24 +92,25 @@ window.updateSensorRadarChart = function(chart, sensorsArray) {
                     width: 2,
                     opacity: 0.8
                 },
-                data: [data],
-                symbol: 'circle',
-                symbolSize: 4,
+                data: [sensor.values],
+                symbol: 'none', // Remove symbols for better performance
                 itemStyle: {
-                    color: colors[index % colors.length]
+                    color: colors[i % colors.length]
                 },
                 areaStyle: {
                     opacity: 0.1
-                }
+                },
+                animation: false // Disable animations for better performance
             });
-        });
+        }
         
+        // Use notMerge: false for better performance
         chart.setOption({
             legend: {
                 data: legendData
             },
             series: series
-        });
+        }, false, false);
         
     } catch (error) {
         console.error('Error updating sensor radar chart:', error);

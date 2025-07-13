@@ -50,7 +50,9 @@ window.initSpeedRacingChart = function(elementId) {
             label: {
                 show: true,
                 position: 'right',
-                formatter: '{c} km/h'
+                formatter: function(params) {
+                    return parseFloat(params.value).toFixed(1) + ' km/h';
+                }
             },
             animationDuration: 1000,
             animationEasing: 'elasticOut'
@@ -64,8 +66,11 @@ window.initSpeedRacingChart = function(elementId) {
 window.updateSpeedRacingChart = function(chart, devices, speeds) {
     if (!chart) return;
     
+    // Round speeds to 1 decimal place
+    const roundedSpeeds = speeds.map(speed => parseFloat(speed).toFixed(1));
+    
     chart.setOption({
         yAxis: { data: devices },
-        series: [{ data: speeds }]
+        series: [{ data: roundedSpeeds }]
     });
 };

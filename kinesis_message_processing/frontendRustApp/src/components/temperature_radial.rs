@@ -3,6 +3,7 @@ use wasm_bindgen::prelude::*;
 use crate::types::RealTimeReading;
 use std::collections::HashMap;
 use gloo::timers::callback::Timeout;
+use web_sys::window;
 
 #[wasm_bindgen]
 extern "C" {
@@ -20,6 +21,8 @@ pub struct TemperatureRadialProps {
 
 pub struct TemperatureRadial {
     radar_chart: Option<JsValue>,
+    last_update: f64,
+    update_throttle_ms: f64,
 }
 
 pub enum TemperatureRadialMsg {
@@ -34,6 +37,8 @@ impl Component for TemperatureRadial {
     fn create(_ctx: &Context<Self>) -> Self {
         Self {
             radar_chart: None,
+            last_update: 0.0,
+            update_throttle_ms: 100.0, // Update max every 100ms
         }
     }
 
@@ -89,33 +94,57 @@ impl Component for TemperatureRadial {
 }
 
 impl TemperatureRadial {
-    fn update_charts(&self, ctx: &Context<Self>) {
+    fn update_charts(&mut self, ctx: &Context<Self>) {
         let readings = &ctx.props().readings;
         
         if readings.is_empty() {
             return;
         }
         
-        if let Some(chart) = &self.radar_chart {
-            let sensor_data = js_sys::Array::new();
-            for (sensor_id, reading) in readings {
-                let data = serde_json::json!({
-                    "sensor_id": sensor_id,
-                    "temperature": reading.temperature,
-                    "speed_kms": reading.speed_kms,
-                    "connection_speed_mbps": reading.connection_speed_mbps,
-                    "position": {
-                        "latitude": reading.position.latitude,
-                        "longitude": reading.position.longitude
-                    },
-                    "kinesis_to_lambda_us": reading.kinesis_to_lambda_us,
-                    "lambda_processing_us": reading.lambda_processing_us,
-                    "cache_to_websocket_us": reading.cache_to_websocket_us,
-                    "websocket_to_frontend_us": reading.websocket_to_frontend_us
-                });
-                sensor_data.push(&JsValue::from_str(&data.to_string()));
-            }
-            update_sensor_radar_chart(chart, &sensor_data);
+        // Throttle updates to reduce rendering overhead
+        let now = window().unwrap().performance().unwrap().now();
+        if now - self.last_update < self.update_throttle_ms {
+            return;
         }
+        self.last_update = now;
+        
+        if let Some(chart) = &self.radar_chart {
+            // Process data in WASM for better performance
+            let processed_data = self.process_sensor_data_wasm(readings);
+            update_sensor_radar_chart(chart, &processed_data);
+        }
+    }
+    
+    fn process_sensor_data_wasm(&self, readings: &HashMap<String, RealTimeReading>) -> js_sys::Array {
+        let sensor_data = js_sys::Array::new();
+        
+        // Limit to max 10 sensors for performance
+        let mut sorted_readings: Vec<_> = readings.iter().collect();
+        sorted_readings.sort_by_key(|(id, _)| *id);
+        
+        for (sensor_id, reading) in sorted_readings.into_iter().take(10) {
+            // Pre-calculate values in Rust (faster than JS)
+            let total_latency = reading.kinesis_to_lambda_us + 
+                               reading.lambda_processing_us + 
+                               reading.cache_to_websocket_us + 
+                               reading.websocket_to_frontend_us;
+            
+            // Create minimal data structure
+            let radar_values = js_sys::Array::new();
+            radar_values.push(&reading.temperature.into());
+            radar_values.push(&reading.speed_kms.into());
+            radar_values.push(&reading.connection_speed_mbps.into());
+            radar_values.push(&((total_latency / 100) as f32).into()); // Scale down
+            radar_values.push(&reading.position.latitude.abs().into());
+            radar_values.push(&reading.position.longitude.abs().into());
+            
+            let sensor_obj = js_sys::Object::new();
+            js_sys::Reflect::set(&sensor_obj, &"sensor_id".into(), &sensor_id.as_str().into()).unwrap();
+            js_sys::Reflect::set(&sensor_obj, &"values".into(), &radar_values).unwrap();
+            
+            sensor_data.push(&sensor_obj);
+        }
+        
+        sensor_data
     }
 }
