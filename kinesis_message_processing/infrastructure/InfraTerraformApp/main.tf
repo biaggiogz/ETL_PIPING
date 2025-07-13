@@ -401,16 +401,21 @@ resource "aws_iam_role_policy" "lambda_ecs" {
       {
         Effect = "Allow"
         Action = [
-          "ecs:RunTask",
+          "ecs:UpdateService",
+          "ecs:DescribeServices",
           "ecs:StopTask",
           "ecs:DescribeTasks",
-          "ecs:ListTasks",
-          "iam:PassRole",
-          "elasticloadbalancing:RegisterTargets",
-          "elasticloadbalancing:DeregisterTargets",
-          "ec2:DescribeNetworkInterfaces"
+          "ecs:ListTasks"
         ]
         Resource = "*"
+      },
+      {
+        Effect = "Allow"
+        Action = "iam:PassRole"
+        Resource = [
+          aws_iam_role.ecs_execution.arn,
+          aws_iam_role.ecs_task.arn
+        ]
       }
     ]
   })
@@ -429,6 +434,9 @@ resource "aws_ecs_service" "app" {
   desired_count   = 1
   launch_type     = "FARGATE"
 
+  deployment_maximum_percent         = 200
+  deployment_minimum_healthy_percent = 0
+
   network_configuration {
     subnets          = aws_subnet.public[*].id
     security_groups  = [aws_security_group.ecs.id]
@@ -441,7 +449,7 @@ resource "aws_ecs_service" "app" {
     container_port   = 8081
   }
 
-  depends_on = [aws_lb_listener.app_8081]
+  depends_on = [aws_lb_listener.app_8081, aws_lb_listener.app_5173]
 }
 
 # Data sources

@@ -10,6 +10,7 @@ resource "aws_lambda_function" "ecs_controller" {
   environment {
     variables = {
       CLUSTER_NAME        = aws_ecs_cluster.main.name
+      SERVICE_NAME        = aws_ecs_service.app.name
       TASK_DEFINITION     = aws_ecs_task_definition.app.arn
       SUBNET_IDS          = join(",", aws_subnet.public[*].id)
       SECURITY_GROUP_ID   = aws_security_group.ecs.id
