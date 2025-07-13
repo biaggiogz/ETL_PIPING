@@ -120,8 +120,8 @@
     </div>
 
     <script>
-        const API_BASE_URL = 'https://5syiy043cj.execute-api.us-east-1.amazonaws.com/prod';
-        const LOAD_BALANCER_URL = 'perspective-kinesis-alb-1988480360.us-east-1.elb.amazonaws.com';
+        const API_BASE_URL = '${api_gateway_url}';
+        const LOAD_BALANCER_URL = '${load_balancer_dns}';
         
         let statusInterval;
         
@@ -133,7 +133,7 @@
         
         async function checkStatus() {
             try {
-                const response = await fetch(`${API_BASE_URL}/ecs`);
+                const response = await fetch(`$${API_BASE_URL}/ecs`);
                 const data = await response.json();
                 updateUI(data.status, data.taskCount || 0);
             } catch (error) {
@@ -145,7 +145,7 @@
         async function startServer() {
             showLoading(true);
             try {
-                const response = await fetch(`${API_BASE_URL}/ecs`, {
+                const response = await fetch(`$${API_BASE_URL}/ecs`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ action: 'start' })
@@ -163,7 +163,7 @@
         async function stopServer() {
             showLoading(true);
             try {
-                const response = await fetch(`${API_BASE_URL}/ecs`, {
+                const response = await fetch(`$${API_BASE_URL}/ecs`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ action: 'stop' })
@@ -184,14 +184,14 @@
             const stopBtn = document.getElementById('stopBtn');
             const viewerLink = document.getElementById('viewerLink');
             
-            statusEl.className = `status ${status.toLowerCase()}`;
-            statusEl.textContent = `Status: ${status} (Tasks: ${taskCount})`;
+            statusEl.className = `status $${status.toLowerCase()}`;
+            statusEl.textContent = `Status: $${status} (Tasks: $${taskCount})`;
             
             if (status === 'RUNNING') {
                 startBtn.disabled = true;
                 stopBtn.disabled = false;
                 viewerLink.style.display = 'inline-block';
-                viewerLink.href = `http://${LOAD_BALANCER_URL}:5173`;
+                viewerLink.href = `http://$${LOAD_BALANCER_URL}:5173`;
             } else if (status === 'PENDING') {
                 startBtn.disabled = true;
                 stopBtn.disabled = true;

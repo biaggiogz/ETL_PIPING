@@ -16,6 +16,17 @@ resource "aws_s3_bucket" "frontend" {
   bucket = "${var.project_name}-perspective-frontend"
 }
 
+# Upload frontend files
+resource "aws_s3_object" "frontend_html" {
+  bucket = aws_s3_bucket.frontend.id
+  key    = "index.html"
+  content = templatefile("${path.module}/frontend/index.html", {
+    api_gateway_url = "https://${aws_api_gateway_rest_api.main.id}.execute-api.${var.aws_region}.amazonaws.com/${aws_api_gateway_stage.prod.stage_name}"
+    load_balancer_dns = aws_lb.main.dns_name
+  })
+  content_type = "text/html"
+}
+
 resource "aws_s3_bucket_public_access_block" "frontend" {
   bucket = aws_s3_bucket.frontend.id
 
@@ -403,9 +414,10 @@ resource "aws_iam_role_policy" "lambda_ecs" {
         Action = [
           "ecs:UpdateService",
           "ecs:DescribeServices",
+          "ecs:ListTasks",
+          "ecs:RunTask",
           "ecs:StopTask",
-          "ecs:DescribeTasks",
-          "ecs:ListTasks"
+          "ecs:DescribeTasks"
         ]
         Resource = "*"
       },
@@ -431,7 +443,7 @@ resource "aws_ecs_service" "app" {
   name            = "${var.project_name}-service"
   cluster         = aws_ecs_cluster.main.id
   task_definition = aws_ecs_task_definition.app.arn
-  desired_count   = 1
+  desired_count   = 0
   launch_type     = "FARGATE"
 
   deployment_maximum_percent         = 200
@@ -448,6 +460,7 @@ resource "aws_ecs_service" "app" {
     container_name   = "perspective-server"
     container_port   = 8081
   }
+
 
   depends_on = [aws_lb_listener.app_8081, aws_lb_listener.app_5173]
 }

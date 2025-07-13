@@ -86,6 +86,28 @@ resource "aws_api_gateway_integration" "ecs_options" {
   }
 }
 
+resource "aws_api_gateway_method_response" "ecs_post" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  resource_id = aws_api_gateway_resource.ecs.id
+  http_method = aws_api_gateway_method.ecs_post.http_method
+  status_code = "200"
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Origin" = true
+  }
+}
+
+resource "aws_api_gateway_method_response" "ecs_get" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  resource_id = aws_api_gateway_resource.ecs.id
+  http_method = aws_api_gateway_method.ecs_get.http_method
+  status_code = "200"
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Origin" = true
+  }
+}
+
 resource "aws_api_gateway_method_response" "ecs_options" {
   rest_api_id = aws_api_gateway_rest_api.main.id
   resource_id = aws_api_gateway_resource.ecs.id
@@ -96,6 +118,28 @@ resource "aws_api_gateway_method_response" "ecs_options" {
     "method.response.header.Access-Control-Allow-Headers" = true
     "method.response.header.Access-Control-Allow-Methods" = true
     "method.response.header.Access-Control-Allow-Origin"  = true
+  }
+}
+
+resource "aws_api_gateway_integration_response" "ecs_post" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  resource_id = aws_api_gateway_resource.ecs.id
+  http_method = aws_api_gateway_method.ecs_post.http_method
+  status_code = aws_api_gateway_method_response.ecs_post.status_code
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Origin" = "'*'"
+  }
+}
+
+resource "aws_api_gateway_integration_response" "ecs_get" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  resource_id = aws_api_gateway_resource.ecs.id
+  http_method = aws_api_gateway_method.ecs_get.http_method
+  status_code = aws_api_gateway_method_response.ecs_get.status_code
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Origin" = "'*'"
   }
 }
 
@@ -116,7 +160,10 @@ resource "aws_api_gateway_deployment" "main" {
   depends_on = [
     aws_api_gateway_integration.ecs_post,
     aws_api_gateway_integration.ecs_get,
-    aws_api_gateway_integration.ecs_options
+    aws_api_gateway_integration.ecs_options,
+    aws_api_gateway_integration_response.ecs_post,
+    aws_api_gateway_integration_response.ecs_get,
+    aws_api_gateway_integration_response.ecs_options
   ]
 
   rest_api_id = aws_api_gateway_rest_api.main.id
