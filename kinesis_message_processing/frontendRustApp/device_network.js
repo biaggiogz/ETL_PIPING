@@ -14,11 +14,6 @@ window.initDeviceNetworkChart = function(elementId) {
     noiseHelper.seed(Math.random());
     
     const option = {
-        title: {
-            text: 'Real-time Device Network (Lat/Lng)',
-            left: 'center',
-            top: 20
-        },
         backgroundColor: '#f8f9fa',
         graphic: {
             elements: []

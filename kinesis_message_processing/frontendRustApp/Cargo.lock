@@ -1108,6 +1108,7 @@ dependencies = [
  "gloo 0.11.0",
  "js-sys",
  "serde",
+ "serde-wasm-bindgen 0.6.5",
  "serde_json",
  "wasm-bindgen",
  "wasm-bindgen-futures",

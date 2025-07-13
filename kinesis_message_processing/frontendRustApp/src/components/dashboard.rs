@@ -106,16 +106,7 @@ impl Component for Dashboard {
                 // Add to pending updates and emit event for Perspective
                 self.pending_updates.push(reading.clone());
                 
-                // Emit custom event for Perspective integration
-                if let Some(window) = web_sys::window() {
-                    if let Ok(event) = web_sys::CustomEvent::new("sensorData") {
-                        let detail = serde_json::to_string(&reading).unwrap_or_default();
-                        let _ = event.init_custom_event_with_can_bubble_and_cancelable_and_detail(
-                            "sensorData", true, false, &wasm_bindgen::JsValue::from_str(&detail)
-                        );
-                        let _ = window.dispatch_event(&event);
-                    }
-                }
+
                 
                 // Limit pending updates to prevent memory issues
                 if self.pending_updates.len() > 1000 {

@@ -6,11 +6,11 @@ use gloo::timers::callback::Timeout;
 
 #[wasm_bindgen]
 extern "C" {
-    #[wasm_bindgen(js_name = initTemperatureRadialChart)]
-    fn init_temperature_radial_chart(element_id: &str) -> JsValue;
+    #[wasm_bindgen(js_name = initSensorRadarChart)]
+    fn init_sensor_radar_chart(element_id: &str) -> JsValue;
     
-    #[wasm_bindgen(js_name = updateTemperatureRadialChart)]
-    fn update_temperature_radial_chart(chart: &JsValue, bands: &js_sys::Array);
+    #[wasm_bindgen(js_name = updateSensorRadarChart)]
+    fn update_sensor_radar_chart(chart: &JsValue, sensors: &js_sys::Array);
 
     #[wasm_bindgen(js_name = initDeviceNetworkChart)]
     fn init_device_network_chart(element_id: &str) -> JsValue;
@@ -25,7 +25,7 @@ pub struct TemperatureRadialProps {
 }
 
 pub struct TemperatureRadial {
-    chart_instance: Option<JsValue>,
+    radar_chart: Option<JsValue>,
     network_chart: Option<JsValue>,
 }
 
@@ -40,7 +40,7 @@ impl Component for TemperatureRadial {
 
     fn create(_ctx: &Context<Self>) -> Self {
         Self {
-            chart_instance: None,
+            radar_chart: None,
             network_chart: None,
         }
     }
@@ -48,10 +48,9 @@ impl Component for TemperatureRadial {
     fn update(&mut self, ctx: &Context<Self>, msg: Self::Message) -> bool {
         match msg {
             TemperatureRadialMsg::InitComponents => {
-                self.chart_instance = Some(init_temperature_radial_chart("temperatureRadialChart"));
+                self.radar_chart = Some(init_sensor_radar_chart("sensorRadarChart"));
                 self.network_chart = Some(init_device_network_chart("deviceNetworkChart"));
                 
-                // After initialization, update with current data if available
                 if !ctx.props().readings.is_empty() {
                     let link = ctx.link().clone();
                     Timeout::new(100, move || {
@@ -61,9 +60,7 @@ impl Component for TemperatureRadial {
                 false
             }
             TemperatureRadialMsg::UpdateData => {
-                if self.network_chart.is_some() || self.chart_instance.is_some() {
-                    self.update_components(ctx);
-                }
+                self.update_charts(ctx);
                 false
             }
         }
@@ -74,11 +71,11 @@ impl Component for TemperatureRadial {
         
         html! {
             <div class="temperature-radial-section">
-                <h2>{"Temperature Distribution Dashboard"}</h2>
+                <h2>{"Sensor Multi-Dimensional Analysis"}</h2>
                 
                 <div class="radial-container">
                     <div class="network-panel">
-                        <h3>{"Device Network (Lat/Lng + Neighbors)"}</h3>
+                        <h3>{"Device Network Visualization"}</h3>
                         <div 
                             id="deviceNetworkChart"
                             onload={init_components}
@@ -87,9 +84,9 @@ impl Component for TemperatureRadial {
                     </div>
                     
                     <div class="radial-chart-panel">
-                        <h3>{"Temperature Radial Visualization"}</h3>
+                        <h3>{"Sensor Metrics Radar"}</h3>
                         <div 
-                            id="temperatureRadialChart"
+                            id="sensorRadarChart"
                         >
                         </div>
                     </div>
@@ -100,70 +97,61 @@ impl Component for TemperatureRadial {
 
     fn rendered(&mut self, ctx: &Context<Self>, first_render: bool) {
         if first_render {
-            // Delay initialization to ensure DOM and scripts are ready
             let link = ctx.link().clone();
             Timeout::new(500, move || {
                 link.send_message(TemperatureRadialMsg::InitComponents);
             }).forget();
         } else {
-            // Always try to update data when component re-renders
             ctx.link().send_message(TemperatureRadialMsg::UpdateData);
         }
     }
 }
 
 impl TemperatureRadial {
-    fn update_components(&self, ctx: &Context<Self>) {
+    fn update_charts(&self, ctx: &Context<Self>) {
         let readings = &ctx.props().readings;
         
         if readings.is_empty() {
             return;
         }
         
-        // Prepare device data for network visualization
-        let mut device_data = Vec::new();
-        let mut bands: HashMap<i32, Vec<String>> = HashMap::new();
-        
-        for (sensor_id, reading) in readings {
-            let temp_band = ((reading.temperature / 5.0).floor() as i32) * 5;
-            bands.entry(temp_band).or_insert_with(Vec::new).push(sensor_id.clone());
-            
-            device_data.push(serde_json::json!({
-                "sensor_id": sensor_id,
-                "latitude": reading.position.latitude,
-                "longitude": reading.position.longitude,
-                "temperature": reading.temperature
-            }));
-        }
-        
         // Update device network chart
         if let Some(chart) = &self.network_chart {
-            let data_array = js_sys::Array::new();
-            for item in device_data {
-                data_array.push(&JsValue::from_str(&item.to_string()));
+            let device_data = js_sys::Array::new();
+            for (sensor_id, reading) in readings {
+                let data = serde_json::json!({
+                    "sensor_id": sensor_id,
+                    "latitude": reading.position.latitude,
+                    "longitude": reading.position.longitude,
+                    "temperature": reading.temperature,
+                    "reading_timestamp_ms": reading.reading_timestamp_ms
+                });
+                device_data.push(&JsValue::from_str(&data.to_string()));
             }
-            update_device_network_chart(chart, &data_array);
+            update_device_network_chart(chart, &device_data);
         }
         
-        // Update temperature radial chart
-        if let Some(chart) = &self.chart_instance {
-            let bands_array = js_sys::Array::new();
-            
-            for (temp_band, devices) in bands {
-                let band_data = js_sys::Object::new();
-                js_sys::Reflect::set(&band_data, &"temp_band".into(), &temp_band.into()).unwrap();
-                js_sys::Reflect::set(&band_data, &"device_count".into(), &devices.len().into()).unwrap();
-                js_sys::Reflect::set(&band_data, &"devices".into(), &{
-                    let devices_array = js_sys::Array::new();
-                    for device in devices {
-                        devices_array.push(&device.into());
-                    }
-                    devices_array.into()
-                }).unwrap();
-                bands_array.push(&band_data);
+        // Update radar chart
+        if let Some(chart) = &self.radar_chart {
+            let sensor_data = js_sys::Array::new();
+            for (sensor_id, reading) in readings {
+                let data = serde_json::json!({
+                    "sensor_id": sensor_id,
+                    "temperature": reading.temperature,
+                    "speed_kms": reading.speed_kms,
+                    "connection_speed_mbps": reading.connection_speed_mbps,
+                    "position": {
+                        "latitude": reading.position.latitude,
+                        "longitude": reading.position.longitude
+                    },
+                    "kinesis_to_lambda_us": reading.kinesis_to_lambda_us,
+                    "lambda_processing_us": reading.lambda_processing_us,
+                    "cache_to_websocket_us": reading.cache_to_websocket_us,
+                    "websocket_to_frontend_us": reading.websocket_to_frontend_us
+                });
+                sensor_data.push(&JsValue::from_str(&data.to_string()));
             }
-            
-            update_temperature_radial_chart(chart, &bands_array);
+            update_sensor_radar_chart(chart, &sensor_data);
         }
     }
 }

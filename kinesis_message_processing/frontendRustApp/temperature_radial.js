@@ -106,11 +106,6 @@ window.initTemperatureRadialChart = function(elementId) {
     const chart = echarts.init(element);
     
     const option = {
-        title: {
-            text: 'Temperature Distribution by 5°C Bands',
-            left: 'center',
-            top: 20
-        },
         tooltip: {
             trigger: 'item',
             formatter: function(params) {

@@ -3,8 +3,15 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{ErrorEvent, MessageEvent, WebSocket};
 use yew::prelude::*;
+use gloo::timers::callback::Timeout;
 
 use crate::types::{RealTimeReading, WebSocketMessage};
+
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_name = parseSensorMessages)]
+    fn parse_sensor_messages(json_strings: &js_sys::Array) -> js_sys::Array;
+}
 
 pub enum WebSocketAction {
     Connect(String),
@@ -20,6 +27,8 @@ pub struct WebSocketService {
     onerror_callback: Callback<String>,
     onopen_callback: Callback<()>,
     onclose_callback: Callback<()>,
+    message_batch: Vec<String>,
+    batch_timeout: Option<Timeout>,
 }
 
 impl WebSocketService {
@@ -35,6 +44,8 @@ impl WebSocketService {
             onerror_callback: onerror,
             onopen_callback: onopen,
             onclose_callback: onclose,
+            message_batch: Vec::new(),
+            batch_timeout: None,
         }
     }
 
@@ -45,12 +56,21 @@ impl WebSocketService {
         let onmessage_closure = Closure::wrap(Box::new(move |e: MessageEvent| {
             if let Ok(txt) = e.data().dyn_into::<js_sys::JsString>() {
                 let data = String::from(txt);
-                if let Ok(mut reading) = serde_json::from_str::<RealTimeReading>(&data) {
-                    // Calculate frontend receive timestamp in nanoseconds
-                    let frontend_timestamp_ns = (js_sys::Date::now() * 1_000_000.0) as u128;
-                    reading.websocket_to_frontend_us = 
-                        frontend_timestamp_ns.saturating_sub(reading.notification_timestamp_ns) as u64 / 1000;
-                    onmessage_callback.emit(reading);
+                
+                // Batch messages for WASM processing
+                let batch = js_sys::Array::new();
+                batch.push(&data.into());
+                
+                // Parse in WASM
+                let parsed_results = crate::parse_sensor_messages(&batch);
+                
+                // Process results
+                for i in 0..parsed_results.length() {
+                    if let Ok(reading_value) = parsed_results.get(i).dyn_into::<js_sys::Object>() {
+                        if let Ok(reading) = serde_wasm_bindgen::from_value::<RealTimeReading>(reading_value.into()) {
+                            onmessage_callback.emit(reading);
+                        }
+                    }
                 }
             }
         }) as Box<dyn FnMut(MessageEvent)>);
